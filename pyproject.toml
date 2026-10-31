@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vaca-muerta-abierta"
+version = "0.0.1"
+description = "Open observatory of Argentina's public per-well oil & gas data (Capitulo IV): downloaded, measured, cleaned, cross-referenced."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Lucas Burriel" }]
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.1",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+]
+keywords = ["oil-and-gas", "vaca-muerta", "open-data", "data-quality", "duckdb", "argentina"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/LucasBurriel/vaca-muerta-abierta"
+
+[tool.setuptools.packages.find]
+include = ["vma*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+ignore = ["E501"]  # ruff format wraps code; long SQL/markdown string literals stay readable on one line
