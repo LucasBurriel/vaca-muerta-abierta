@@ -1,0 +1,4 @@
+idempresa,anio,mes,idpozo,prod_pet,prod_gas,prod_agua,tef,empresa,sigla,formacion,cuenca
+YPF,2025,1,1,100.5,20.1,5,31,YPF S.A.,YPF.Nq.LACh-1(h),vaca muerta,NEUQUINA
+YPF,2025,2,1,90.0,18.0,4,28,YPF S.A.,YPF.Nq.LACh-1(h),vaca muerta,NEUQUINA
+VIS,2025,1,2,50.0,10.0,1,31,VISTA OIL & GAS ARGENTINA SAU, VIS.Nq.BA-2(h),vaca muerta,NEUQUINA
