@@ -41,6 +41,11 @@ def thousand_m3_to_mmscf(km3: float) -> float:
     return thousand_m3_to_mcf(km3) / 1000.0
 
 
+def gas_thousand_m3_to_m3_gas(km3: float) -> float:
+    """Gas: thousands of m³ (as published) -> m³, e.g. for a GOR in m³/m³."""
+    return km3 * 1000.0
+
+
 def gas_thousand_m3_to_m3_oil_eq(km3: float) -> float:
     """Gas in thousands of m³ -> m³ of oil equivalent with the Secretaría's 1,000:1 factor."""
     return km3 * 1000.0 / M3_GAS_PER_M3_OIL_EQ

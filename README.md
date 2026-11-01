@@ -16,9 +16,33 @@ This repository builds an **open observatory** on top of it, in phases that each
 |---|---|---|
 | **F0 · Measure the dirt** | dated, hashed download of every dataset; real schema of each file; a data-quality report with numbers and charts; alias drafts; decisions | **done** → [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md) |
 | **F1 · Well master** | one row per physical well, every spelling of its sigla as alias, operator and formation normalised with versioned alias tables, coordinates validated, lateral length with explicit precedence, first production computed; published as CSV + Parquet with per-row lineage and flags | **done** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
-| F2 · Indicators | per-metre intensities, IP30/90/180, type curves by cohort with lineage, outliers flagged not deleted | next |
-| F3 · Site | interactive explorer + map, rebuilt monthly by CI | |
+| **F2 · Indicators** | one row per well: IP30/90/180 in producing days, cumulatives at 6/12/24 months, everything per metre of lateral, GOR, water cut, fluid window, flags and lineage; type curves P10/P50/P90 by cohort × formation (× window, × operator) with `n_pozos`, published with and without outliers | **done** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
+| F3 · Site | interactive explorer + map, rebuilt monthly by CI | next |
 | F4 · Questions in natural language | an agent with read-only tools over the published tables; no number without its query | later |
+
+## What F2 found (2026-10-31)
+
+Full report: [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md); formulas, units and rules:
+[`docs/indicadores.md`](docs/indicadores.md). Headlines:
+
+1. **Per-metre comparison covers 2,689 of 4,625 producing wells (58 %).** The rest have no lateral length in the
+   public fracture file (1,001 no record, 856 length 0, 178 horizontal wells with length 0) or a lateral under
+   500 m (27). Every one of them is in the table with the reason; none is a zero.
+2. **IP is measured in producing days, not calendar days**: 46 % of the wells start in a partial month. IP30 /
+   IP90 / IP180 are computable for 99 % / 96 % / 92 % of producing wells; 12-month cumulatives for 90 %.
+3. **Vaca Muerta laterals doubled in a decade and productivity per metre did not fall.** Median lateral: 1,206 m
+   for the 2015 cohort, 2,000 m in 2018, 3,042 m in 2025. In the oil window, median IP90 of oil per metre stays
+   between 0.045 and 0.056 m³/d per m for every cohort from 2016 to 2025 while the median lateral went from
+   1,409 m to 3,064 m; stages per 100 m went from 1.3 to 1.7.
+4. **The fluid window matters more than the operator.** Oil-equivalent per metre ranked gas-window operators first
+   until the window (derived from each well's own GOR, ADR-020) was separated: in the oil window the top medians
+   are 0.063, 0.060 and 0.057 m³/d per m with n = 214, 54 and 42; the 2018 cohort "anomaly" is 54 % gas wells.
+5. **17 outliers out of 2,592 screened, all low** — wells that produced under 20 m³/d of oil equivalent in their
+   first 90 producing days over a 2,000 m lateral. Marked with the rule and the z-score, never deleted; the type
+   curves are published with and without them (`incluye_outliers`).
+
+![type curve](docs/indicadores-curva-tipo-vaca-muerta.png)
+![IP90 per metre by operator](docs/indicadores-ip90-por-operadora.png)
 
 ## What F1 found (2026-10-31)
 
@@ -77,7 +101,7 @@ Full report: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md).
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 67 tests, no network, no data needed
+python -m pytest -q            # 83 tests, no network, no data needed
 
 python pipeline.py sources     # the catalogue (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<today>/ + manifest.json (URL, bytes, sha256, CKAN last_modified)
@@ -85,6 +109,8 @@ python pipeline.py schema      # real schema of every file -> docs/esquemas/*.md
 python pipeline.py quality     # informes/calidad-<today>.md + docs/calidad-*.png + alias/borradores/  (~2 min)
 python pipeline.py master      # data/publicado/<today>/pozos.{csv,parquet} + informes/maestro-<today>.md  (~1 min)
 python pipeline.py diff        # informes/diff-<a>-<b>.md between the last two downloads (or --a/--b)
+python pipeline.py indicadores # data/publicado/<today>/indicadores.{csv,parquet}  (~10 s)
+python pipeline.py curvas      # data/publicado/<today>/curvas_tipo.{csv,parquet} + informes/indicadores-<today>.md + docs/indicadores-*.png
 ```
 
 Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib`. Raw data is never committed; the manifest is what
@@ -93,7 +119,7 @@ makes two downloads comparable.
 ## Layout
 
 ```
-pipeline.py           sources | download | schema | quality | master | diff
+pipeline.py           sources | download | schema | quality | master | diff | indicadores | curvas
 vma/
   sources.py          catalogue of CKAN datasets/resources (ids, URLs, sizes, default vs opt-in)
   download.py         dated download with manifest; network isolated behind an injectable opener
@@ -104,16 +130,21 @@ vma/
   alias.py            the three versioned alias tables (variante, canonico, fuente, desde, nota)
   master.py           the F1 well master: one row per physical well, rules, flags, lineage, CSV + Parquet, report
   diff.py             differences between two dated downloads (new wells, rectified months, operator changes)
+  indicadores.py      F2: monthly production per well, IP in producing days, cumulatives, per metre, GOR, window, outliers
+  curvas.py           F2: type curves P10/P50/P90/mean by cohort × formation (× window, × operator), min 5 wells
+  informe_indicadores.py  the F2 report and its four charts
 docs/
   fuentes.md          every dataset: URL, licence, grain, size, last data, units as published
-  decisiones.md       ADRs 001-014: name, scope, well key, units, raw-data policy, stack, capiv, lateral
-                      precedence, master universe, alias policy, placeholder dates, publication format
+  decisiones.md       ADRs 001-020: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+                      precedence, master universe, alias policy, placeholder dates, publication format,
+                      indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window
   maestro.md          every column of the master with its rule, and every flag
+  indicadores.md      every column of indicadores and curvas_tipo: formula, units, rule, flags
   esquemas/           one markdown per dataset with its real columns
   calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report
-informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), diff-<a>-<b>.md
+informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), indicadores-<date>.md (F2), diff-<a>-<b>.md
 alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (appended by the build); borradores/
-data/publicado/       <date>/pozos.csv + pozos.parquet — the master (git-ignored, rebuild or take the release)
+data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.* (git-ignored, rebuild or take the release)
 tests/                pytest, tiny CSV fixtures (master, diff), fake network
 ```
 

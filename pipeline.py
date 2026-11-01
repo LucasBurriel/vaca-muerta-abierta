@@ -6,6 +6,8 @@ python pipeline.py schema                        real schema of each dataset -> 
 python pipeline.py quality                       informes/calidad-<date>.md + docs/*.png
 python pipeline.py master                        data/publicado/<date>/pozos.{csv,parquet} + informes/maestro-<date>.md
 python pipeline.py diff [--a DATE --b DATE]      informes/diff-<a>-<b>.md between two downloads (default: last two)
+python pipeline.py indicadores                   data/publicado/<date>/indicadores.{csv,parquet} (per-well indicators)
+python pipeline.py curvas                        data/publicado/<date>/curvas_tipo.{csv,parquet} + informes/indicadores-<date>.md
 """
 
 from __future__ import annotations
@@ -34,6 +36,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("quality", help="build the data-quality report with charts")
     m = sub.add_parser("master", help="build and publish the well master (one row per physical well)")
     m.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
+    i = sub.add_parser(
+        "indicadores", help="per-well indicators with lineage from the latest master + raw production"
+    )
+    i.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
+    c = sub.add_parser(
+        "curvas", help="type curves by cohort (with and without outliers) + the F2 report with charts"
+    )
+    c.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
     df_ = sub.add_parser("diff", help="differences between two dated downloads in data/raw/")
     df_.add_argument("--a", default=None, help="earlier download folder (YYYY-MM-DD)")
     df_.add_argument("--b", default=None, help="later download folder (YYYY-MM-DD)")
@@ -64,6 +74,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "master":
         from vma.master import run
+
+        run(ROOT, today=args.day)
+        return 0
+    if args.cmd == "indicadores":
+        from vma.indicadores import run
+
+        run(ROOT, today=args.day)
+        return 0
+    if args.cmd == "curvas":
+        from vma.curvas import run
 
         run(ROOT, today=args.day)
         return 0

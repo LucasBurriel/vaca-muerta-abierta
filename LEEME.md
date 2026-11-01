@@ -16,9 +16,31 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 |---|---|---|
 | **F0 · Medir la suciedad** | descarga fechada y con hash de cada dataset; esquema real de cada archivo; informe de calidad con números y gráficos; borradores de alias; decisiones | **hecha** → [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md) |
 | **F1 · Maestro de pozos** | una fila por pozo físico, todas las grafías de su sigla como alias, operadora y formación normalizadas con tablas versionadas, coordenadas validadas, rama con precedencia explícita, primera producción calculada; publicado como CSV + Parquet con linaje y flags por fila | **hecha** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
-| F2 · Indicadores | intensidades por metro, IP30/90/180, curvas tipo por cohorte con linaje, outliers marcados y no borrados | siguiente |
-| F3 · Sitio | explorador interactivo + mapa, regenerado cada mes por CI | |
+| **F2 · Indicadores** | una fila por pozo: IP30/90/180 en días efectivos, acumulados a 6/12/24 meses, todo por metro de rama, GOR, corte de agua, ventana de fluido, flags y linaje; curvas tipo P10/P50/P90 por cohorte × formación (× ventana, × operadora) con `n_pozos`, publicadas con y sin outliers | **hecha** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
+| F3 · Sitio | explorador interactivo + mapa, regenerado cada mes por CI | siguiente |
 | F4 · Preguntas en lenguaje natural | un agente con herramientas de solo lectura sobre las tablas publicadas; ningún número sin su consulta | después |
+
+## Qué encontró F2 (31-10-2026)
+
+Informe: [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md); fórmulas, unidades y reglas:
+[`docs/indicadores.md`](docs/indicadores.md) (en inglés). Lo principal:
+
+1. **La comparación por metro cubre 2.689 de 4.625 pozos productores (58 %).** El resto no tiene longitud de rama en
+   el archivo público de fractura (1.001 sin registro, 856 con rama 0, 178 horizontales con rama 0) o tiene una
+   rama menor a 500 m (27). Todos están en la tabla con el motivo; ninguno es un cero.
+2. **El IP se mide en días efectivos, no calendario**: el 46 % de los pozos arranca en un mes parcial. IP30 /
+   IP90 / IP180 se calculan para el 99 % / 96 % / 92 % de los pozos productores; el acumulado a 12 meses, para el 90 %.
+3. **Las ramas de Vaca Muerta se duplicaron en una década y la productividad por metro no cayó.** Mediana de rama:
+   1.206 m en la cohorte 2015, 2.000 m en 2018, 3.042 m en 2025. En la ventana de petróleo, la mediana de IP90 de
+   petróleo por metro se mantiene entre 0,045 y 0,056 m³/d por m en todas las cohortes de 2016 a 2025 mientras la
+   rama mediana pasó de 1.409 m a 3.064 m; las etapas cada 100 m pasaron de 1,3 a 1,7.
+4. **La ventana de fluido pesa más que la operadora.** El equivalente por metro rankeaba primero a las operadoras de
+   ventana de gas hasta separar la ventana (derivada del GOR de cada pozo, ADR-020): en la ventana de petróleo las
+   mejores medianas son 0,063, 0,060 y 0,057 m³/d por m con n = 214, 54 y 42; la "anomalía" de la cohorte 2018 es
+   que el 54 % son pozos de gas.
+5. **17 outliers sobre 2.592 pozos evaluados, todos bajos**: pozos que produjeron menos de 20 m³/d equivalentes en
+   sus primeros 90 días efectivos sobre una rama de 2.000 m. Marcados con la regla y el z, nunca borrados; las
+   curvas tipo se publican con y sin ellos (`incluye_outliers`).
 
 ## Qué encontró F1 (31-10-2026)
 
@@ -71,7 +93,7 @@ Informe completo: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 67 tests, sin red, sin datos
+python -m pytest -q            # 83 tests, sin red, sin datos
 
 python pipeline.py sources     # el catálogo (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<hoy>/ + manifest.json (URL, bytes, sha256, last_modified de CKAN)
@@ -79,6 +101,8 @@ python pipeline.py schema      # esquema real de cada archivo -> docs/esquemas/*
 python pipeline.py quality     # informes/calidad-<hoy>.md + docs/calidad-*.png + alias/borradores/  (~2 min)
 python pipeline.py master      # data/publicado/<hoy>/pozos.{csv,parquet} + informes/maestro-<hoy>.md  (~1 min)
 python pipeline.py diff        # informes/diff-<a>-<b>.md entre las dos últimas descargas (o --a/--b)
+python pipeline.py indicadores # data/publicado/<hoy>/indicadores.{csv,parquet}  (~10 s)
+python pipeline.py curvas      # data/publicado/<hoy>/curvas_tipo.{csv,parquet} + informes/indicadores-<hoy>.md + docs/indicadores-*.png
 ```
 
 Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib`. Los datos crudos nunca se versionan; el manifiesto
@@ -95,7 +119,8 @@ es lo que hace comparables dos descargas.
 - **Los outliers se marcan, no se borran. Lo que falta es "sin dato, porque…", nunca cero.**
 
 Las decisiones (nombre, alcance, clave de pozo, unidades, relación con `capiv`, precedencia de la rama, política de
-alias, fechas de relleno, formato de publicación) están en [docs/decisiones.md](docs/decisiones.md).
+alias, fechas de relleno, formato de publicación, grano de los indicadores, tasas por día efectivo, mínimo de pozos,
+regla de outliers, umbral de rama, ventana de fluido) están en [docs/decisiones.md](docs/decisiones.md).
 
 ## Licencia
 
