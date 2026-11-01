@@ -2,6 +2,8 @@ name: publish
 
 # Rebuilds the published tables from a fresh download and deploys the static site to GitHub Pages.
 # Monthly (the source lags one to three months and is revised backwards, ADR-005) and on demand.
+# If the portal cannot be reached from the runner, the site is still deployed from the committed
+# site/data/ snapshot (ADR-022) and the run says so in its summary.
 
 on:
   workflow_dispatch:
@@ -20,29 +22,41 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e .
-      - name: download (~460 MB, dated, hashed)
-        run: python pipeline.py download
-      - name: master
-        run: python pipeline.py master
-      - name: indicadores
-        run: python pipeline.py indicadores
-      - name: curvas
-        run: python pipeline.py curvas
-      - name: site data
-        run: python pipeline.py site
-      - name: size of what the browser loads
-        run: du -ah site/data && du -sh site
+      - name: can the runner reach the portal?
+        run: curl -sS -I --max-time 60 https://datos.energia.gob.ar/ | head -5 || echo "::warning::datos.energia.gob.ar did not answer a HEAD request within 60 s"
+      - name: download (~460 MB) -> master -> indicadores -> curvas -> site
+        id: pipeline
+        continue-on-error: true
+        run: |
+          python pipeline.py download
+          python pipeline.py master
+          python pipeline.py indicadores
+          python pipeline.py curvas
+          python pipeline.py site
+      - name: summary
+        run: |
+          if [ "${{ steps.pipeline.outcome }}" = "success" ]; then
+            echo "## Rebuilt from a fresh download" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Pipeline failed: deploying the committed site/data snapshot" >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::pipeline failed (see the step above); the site keeps the last committed data"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -c "import json;m=json.load(open('site/data/meta.json'));print('fecha_descarga', m['fecha_descarga']);print('version_maestro', m['version_maestro']);print('generado', m['generado_utc'])" >> "$GITHUB_STEP_SUMMARY"
+          du -ah site/data >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
       - name: keep the published tables and reports as a run artifact
+        if: steps.pipeline.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: publicado-${{ github.run_id }}

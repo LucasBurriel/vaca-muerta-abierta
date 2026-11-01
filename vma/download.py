@@ -14,6 +14,8 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from datetime import UTC, date, datetime
@@ -28,9 +30,21 @@ CHUNK = 1 << 20
 Opener = Callable[[str], IO[bytes]]
 
 
+RETRIES = 3  # the portal is slow to accept connections from some networks; retry before giving up
+BACKOFF_S = (15, 60)
+
+
 def open_url(url: str) -> IO[bytes]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    return urllib.request.urlopen(req, timeout=120)  # noqa: S310 - fixed https hosts
+    last: Exception | None = None
+    for attempt in range(RETRIES):
+        try:
+            return urllib.request.urlopen(req, timeout=120)  # noqa: S310 - fixed https hosts
+        except (urllib.error.URLError, TimeoutError, OSError) as e:  # connect/read timeouts, resets
+            last = e
+            if attempt + 1 < RETRIES:
+                time.sleep(BACKOFF_S[min(attempt, len(BACKOFF_S) - 1)])
+    raise last  # type: ignore[misc]
 
 
 def raw_dir(root: Path, day: date | None = None) -> Path:
