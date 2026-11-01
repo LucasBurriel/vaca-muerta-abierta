@@ -22,6 +22,10 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 
 ## Preguntarle a los datos (F4, 01-11-2026)
 
+**Cada uno con su clave.** El agente corre en tu máquina con tu propia cuenta de Anthropic: clonás el repo, ponés
+`ANTHROPIC_API_KEY` y preguntás. No hay nada hosteado ni clave compartida; el sitio es gratis porque es estático, el
+consumo del agente lo paga quien lo usa. Sin clave corre un mock sin modelo, así que tests y demo andan igual.
+
 ```
 $ python agente.py "¿Qué operadora tiene la mejor mediana de IP90 de petróleo por metro en Vaca Muerta, ventana de petróleo, cohorte 2024?"
   -> ranking({"filtros": {"formacion": "Vaca Muerta", "ventana": "petroleo", "cohorte": 2024}, "top": 5})

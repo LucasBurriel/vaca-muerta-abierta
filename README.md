@@ -22,6 +22,10 @@ This repository builds an **open observatory** on top of it, in phases that each
 
 ## Ask it questions (F4, 2026-11-01)
 
+**Bring your own key.** The agent runs on your machine, against your own Anthropic account: clone the repo, set
+`ANTHROPIC_API_KEY`, ask. Nothing is hosted and no key is shared; the site stays free because it is static, the
+agent is yours to pay for. Without a key it falls back to a model-free mock, so tests and the demo run anyway.
+
 ```
 $ python agente.py "¿Qué operadora tiene la mejor mediana de IP90 de petróleo por metro en Vaca Muerta, ventana de petróleo, cohorte 2024?"
   -> ranking({"filtros": {"formacion": "Vaca Muerta", "ventana": "petroleo", "cohorte": 2024}, "top": 5})
