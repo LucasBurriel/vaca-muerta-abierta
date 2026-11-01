@@ -1,0 +1,6 @@
+id_base_fractura_adjiv,idpozo,sigla,cuenca,areapermisoconcesion,yacimiento,formacion_productiva,tipo_reservorio,subtipo_reservorio,longitud_rama_horizontal_m,cantidad_fracturas,tipo_terminacion,arena_bombeada_nacional_tn,arena_bombeada_importada_tn,agua_inyectada_m3,fecha_inicio_fractura,fecha_fin_fractura,empresa_informante
+10,1,OP.Nq.AA-1(h),NEUQUINA,AREA UNO,YAC UNO,vaca muerta,NO CONVENCIONAL,SHALE,2500,35,Tapón disparo,3000,1000,40000,2020-03-02,2020-03-20,YPF S.A.
+11,4,OP.Nq.CC-3,NEUQUINA,AREA DOS,YAC DOS,lajas,NO CONVENCIONAL,TIGHT,0,20,Tapón disparo,1500,0,20000,2021-06-05,2021-06-20,PAN AMERICAN ENERGY SL
+12,5,OP.Nq.DD-4,NEUQUINA,AREA DOS,YAC DOS,vaca muerta,NO CONVENCIONAL,SHALE,2500,30,Tapón disparo,2000,500,30000,2022-02-05,2022-02-20,YPF S.A.
+13,5,OP.Nq.DD-4,NEUQUINA,AREA DOS,YAC DOS,vaca muerta,NO CONVENCIONAL,SHALE,2600,5,Tapón disparo,300,0,4000,2024-02-05,2024-02-08,YPF S.A.
+14,7,OP.Nq.GG-7,GOLFO SAN JORGE,AREA TRES,YAC TRES,bajo barreal,CONVENCIONAL,,0,2,Punzado,50,0,600,2015-02-05,2015-02-08,YPF S.A.

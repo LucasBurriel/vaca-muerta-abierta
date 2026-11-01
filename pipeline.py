@@ -4,6 +4,8 @@ python pipeline.py sources                       list catalogued sources
 python pipeline.py download [key ...] [--force]  raw CSVs -> data/raw/<date>/ + manifest.json
 python pipeline.py schema                        real schema of each dataset -> docs/esquemas/
 python pipeline.py quality                       informes/calidad-<date>.md + docs/*.png
+python pipeline.py master                        data/publicado/<date>/pozos.{csv,parquet} + informes/maestro-<date>.md
+python pipeline.py diff [--a DATE --b DATE]      informes/diff-<a>-<b>.md between two downloads (default: last two)
 """
 
 from __future__ import annotations
@@ -30,6 +32,11 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("sources", help="list catalogued sources")
     sub.add_parser("schema", help="dump the real schema of every downloaded dataset")
     sub.add_parser("quality", help="build the data-quality report with charts")
+    m = sub.add_parser("master", help="build and publish the well master (one row per physical well)")
+    m.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
+    df_ = sub.add_parser("diff", help="differences between two dated downloads in data/raw/")
+    df_.add_argument("--a", default=None, help="earlier download folder (YYYY-MM-DD)")
+    df_.add_argument("--b", default=None, help="later download folder (YYYY-MM-DD)")
 
     args = ap.parse_args(argv)
     if args.cmd == "sources":
@@ -55,6 +62,15 @@ def main(argv: list[str] | None = None) -> int:
 
         print(build_report(ROOT))
         return 0
+    if args.cmd == "master":
+        from vma.master import run
+
+        run(ROOT, today=args.day)
+        return 0
+    if args.cmd == "diff":
+        from vma.diff import run
+
+        return run(ROOT, args.a, args.b)
     return 1
 
 

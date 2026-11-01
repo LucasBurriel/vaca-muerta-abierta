@@ -15,10 +15,32 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 | fase | qué | estado |
 |---|---|---|
 | **F0 · Medir la suciedad** | descarga fechada y con hash de cada dataset; esquema real de cada archivo; informe de calidad con números y gráficos; borradores de alias; decisiones | **hecha** → [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md) |
-| F1 · Maestro de pozos | una fila por pozo físico, todas las grafías de su sigla como alias, operadora y formación normalizadas con tablas versionadas, coordenadas validadas; publicado como CSV/Parquet | siguiente |
-| F2 · Indicadores | intensidades por metro, IP30/90/180, curvas tipo por cohorte con linaje, outliers marcados y no borrados | |
+| **F1 · Maestro de pozos** | una fila por pozo físico, todas las grafías de su sigla como alias, operadora y formación normalizadas con tablas versionadas, coordenadas validadas, rama con precedencia explícita, primera producción calculada; publicado como CSV + Parquet con linaje y flags por fila | **hecha** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
+| F2 · Indicadores | intensidades por metro, IP30/90/180, curvas tipo por cohorte con linaje, outliers marcados y no borrados | siguiente |
 | F3 · Sitio | explorador interactivo + mapa, regenerado cada mes por CI | |
 | F4 · Preguntas en lenguaje natural | un agente con herramientas de solo lectura sobre las tablas publicadas; ningún número sin su consulta | después |
+
+## Qué encontró F1 (31-10-2026)
+
+Informe: [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md); columnas y reglas:
+[`docs/maestro.md`](docs/maestro.md) (en inglés). Lo principal:
+
+1. **5.960 `idpozo` son 5.750 pozos físicos.** 189 pozos tienen dos o más `idpozo` (188 porque se informan en
+   dos formaciones); una sola sigla de todo el universo tiene dos grafías. La identidad acá es de grano y de
+   nombres de empresas, no de códigos de pozo.
+2. **La "fecha de primera producción" del padrón es un año.** El 99,4 % de sus filas dice enero; calculada desde
+   la tabla de producción (primer mes con petróleo o gas > 0), el mes difiere en el 74 % de los pozos. El maestro
+   publica las dos columnas y marca la diferencia.
+3. **La historia de operadoras importa más que la grafía.** Seis nombres se unifican en otros (cambios de
+   denominación evidenciados por los mismos pozos cambiando de nombre en un mes: Vista Oil & Gas → Vista Energy,
+   PAE LLC → SL, GeoPark Ltd. → S.A., y dos grafías puras); 714 pozos (12 %) cambiaron de manos en la historia
+   de producción: ventas de activos, que quedan como `operadoras_historicas` y nunca se unifican.
+4. **La longitud de rama se conoce en 2.735 de 5.050 pozos de la Neuquina.** 1.001 no tienen registro de
+   fractura; 1.314 tienen registros con rama 0, 181 de ellos con ≥ 10 etapas (horizontales sin la longitud
+   cargada → nulo, nunca 0). Mediana donde se conoce: 2.550 m, 41 etapas.
+5. **Lo demás es poco y se corrige sin borrar**: 1 pozo con longitud y latitud invertidas (las 70 filas de F0
+   eran un pozo × 70 meses), 65 pozos con fechas de perforación de relleno (1902/1910) anuladas, 175 con
+   profundidad 0, 4 con más de 8.000 m marcados, 0 pozos fuera del recuadro de su cuenca.
 
 ## Qué encontró F0 (30-10-2026)
 
@@ -49,12 +71,14 @@ Informe completo: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 41 tests, sin red, sin datos
+python -m pytest -q            # 67 tests, sin red, sin datos
 
 python pipeline.py sources     # el catálogo (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<hoy>/ + manifest.json (URL, bytes, sha256, last_modified de CKAN)
 python pipeline.py schema      # esquema real de cada archivo -> docs/esquemas/*.md
-python pipeline.py quality     # informes/calidad-<hoy>.md + docs/calidad-*.png + alias/*.csv  (~2 min)
+python pipeline.py quality     # informes/calidad-<hoy>.md + docs/calidad-*.png + alias/borradores/  (~2 min)
+python pipeline.py master      # data/publicado/<hoy>/pozos.{csv,parquet} + informes/maestro-<hoy>.md  (~1 min)
+python pipeline.py diff        # informes/diff-<a>-<b>.md entre las dos últimas descargas (o --a/--b)
 ```
 
 Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib`. Los datos crudos nunca se versionan; el manifiesto
@@ -70,8 +94,8 @@ es lo que hace comparables dos descargas.
   futuro lleva las columnas y la regla de las que sale.
 - **Los outliers se marcan, no se borran. Lo que falta es "sin dato, porque…", nunca cero.**
 
-Las decisiones (nombre, alcance, clave de pozo, unidades, relación con `capiv`) están en
-[docs/decisiones.md](docs/decisiones.md).
+Las decisiones (nombre, alcance, clave de pozo, unidades, relación con `capiv`, precedencia de la rama, política de
+alias, fechas de relleno, formato de publicación) están en [docs/decisiones.md](docs/decisiones.md).
 
 ## Licencia
 

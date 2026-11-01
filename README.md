@@ -15,10 +15,37 @@ This repository builds an **open observatory** on top of it, in phases that each
 | phase | what | status |
 |---|---|---|
 | **F0 · Measure the dirt** | dated, hashed download of every dataset; real schema of each file; a data-quality report with numbers and charts; alias drafts; decisions | **done** → [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md) |
-| F1 · Well master | one row per physical well, every spelling of its sigla as alias, operator and formation normalised with versioned alias tables, coordinates validated; published as CSV/Parquet | next |
-| F2 · Indicators | per-metre intensities, IP30/90/180, type curves by cohort with lineage, outliers flagged not deleted | |
+| **F1 · Well master** | one row per physical well, every spelling of its sigla as alias, operator and formation normalised with versioned alias tables, coordinates validated, lateral length with explicit precedence, first production computed; published as CSV + Parquet with per-row lineage and flags | **done** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
+| F2 · Indicators | per-metre intensities, IP30/90/180, type curves by cohort with lineage, outliers flagged not deleted | next |
 | F3 · Site | interactive explorer + map, rebuilt monthly by CI | |
 | F4 · Questions in natural language | an agent with read-only tools over the published tables; no number without its query | later |
+
+## What F1 found (2026-10-31)
+
+Full report: [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md); columns and rules:
+[`docs/maestro.md`](docs/maestro.md). Headlines:
+
+1. **5,960 `idpozo` are 5,750 physical wells.** 189 wells carry two or more `idpozo` (188 because they are
+   reported on two formations); only **one** sigla in the whole universe has two raw spellings
+   (`APA.NQ.Gu-1160` / `APA.Nq.Gu-1160`). Identity in this data is about grain and about *names of companies*,
+   not about well codes.
+2. **The padrón's "first production month" is a year.** 99.4 % of its rows say January; computed from the
+   production file (first month with oil or gas > 0), the month differs for 74 % of wells. The master publishes
+   both and flags the difference.
+3. **Operator history matters more than operator spelling.** Six names merge into others (renames evidenced by
+   the same wells changing name in one month: Vista Oil & Gas → Vista Energy, PAE LLC → SL, GeoPark Ltd. → S.A.,
+   two pure spellings); 714 wells (12 %) changed hands in the production history — asset sales that are kept as
+   `operadoras_historicas`, never merged.
+4. **Lateral length is known for 2,735 of 5,050 Neuquina wells.** 1,001 have no fracture record; 1,314 have
+   records whose length is 0, 181 of them with ≥ 10 stages (horizontal wells, length missing → null, never 0).
+   Median lateral where known: 2,550 m, 41 stages. Coverage by year is in the chart below: before 2015 almost
+   nothing, since 2021 above 75 %.
+5. **The rest is small and corrected, not deleted**: 1 well with longitude/latitude swapped (the 70 rows of F0
+   were one well × 70 months), 65 wells with placeholder drilling dates (1902/1910) nulled, 175 with depth 0,
+   4 with depth above 8,000 m kept and flagged, 0 wells outside their basin's bounding box.
+
+![wells per operator](docs/maestro-pozos-por-operadora.png)
+![first production per year](docs/maestro-primera-produccion-por-anio.png)
 
 ## What F0 found (2026-10-30)
 
@@ -50,12 +77,14 @@ Full report: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md).
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 41 tests, no network, no data needed
+python -m pytest -q            # 67 tests, no network, no data needed
 
 python pipeline.py sources     # the catalogue (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<today>/ + manifest.json (URL, bytes, sha256, CKAN last_modified)
 python pipeline.py schema      # real schema of every file -> docs/esquemas/*.md
-python pipeline.py quality     # informes/calidad-<today>.md + docs/calidad-*.png + alias/*.csv  (~2 min)
+python pipeline.py quality     # informes/calidad-<today>.md + docs/calidad-*.png + alias/borradores/  (~2 min)
+python pipeline.py master      # data/publicado/<today>/pozos.{csv,parquet} + informes/maestro-<today>.md  (~1 min)
+python pipeline.py diff        # informes/diff-<a>-<b>.md between the last two downloads (or --a/--b)
 ```
 
 Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib`. Raw data is never committed; the manifest is what
@@ -64,7 +93,7 @@ makes two downloads comparable.
 ## Layout
 
 ```
-pipeline.py           sources | download | schema | quality
+pipeline.py           sources | download | schema | quality | master | diff
 vma/
   sources.py          catalogue of CKAN datasets/resources (ids, URLs, sizes, default vs opt-in)
   download.py         dated download with manifest; network isolated behind an injectable opener
@@ -72,14 +101,20 @@ vma/
   normalize.py        sigla levels L0-L4, operator and formation blocking keys
   units.py            the only place that converts units (bbl, Mcf, ft, lb/ft, oil equivalent)
   quality.py          the F0 report: cross-matching, variants, nulls, duplicates, ranges, lag, charts
+  alias.py            the three versioned alias tables (variante, canonico, fuente, desde, nota)
+  master.py           the F1 well master: one row per physical well, rules, flags, lineage, CSV + Parquet, report
+  diff.py             differences between two dated downloads (new wells, rectified months, operator changes)
 docs/
   fuentes.md          every dataset: URL, licence, grain, size, last data, units as published
-  decisiones.md       ADRs: name, scope, well key, units, raw-data policy, stack, relationship with capiv
+  decisiones.md       ADRs 001-014: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+                      precedence, master universe, alias policy, placeholder dates, publication format
+  maestro.md          every column of the master with its rule, and every flag
   esquemas/           one markdown per dataset with its real columns
-  calidad-*.png       charts of the quality report
-informes/             dated quality reports
-alias/                operadoras.csv, formaciones.csv — drafts for F1 to curate (status: draft | single)
-tests/                pytest, tiny CSV fixtures, fake network
+  calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report
+informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), diff-<a>-<b>.md
+alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (appended by the build); borradores/
+data/publicado/       <date>/pozos.csv + pozos.parquet — the master (git-ignored, rebuild or take the release)
+tests/                pytest, tiny CSV fixtures (master, diff), fake network
 ```
 
 ## Rules this repository follows

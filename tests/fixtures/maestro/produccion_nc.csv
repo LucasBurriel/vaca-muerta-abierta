@@ -1,0 +1,10 @@
+idempresa,anio,mes,idpozo,prod_pet,prod_gas,prod_agua,tef,empresa,sigla,formacion,profundidad,areapermisoconcesion,areayacimiento,cuenca,provincia,coordenadax,coordenaday,tipopozo,tipoestado,sub_tipo_recurso
+YPF,2020,4,1,100.5,20.0,10.0,30,YPF S.A.,OP.Nq.AA-1(h),vaca muerta,3000,AREA UNO,YAC UNO,NEUQUINA,Neuquén,-68.9,-38.5,Petrolífero,Extracción Efectiva,SHALE
+YPF,2020,5,1,200.0,40.0,20.0,31,YPF S.A.,OP.Nq.AA-1(h),vaca muerta,3000,AREA UNO,YAC UNO,NEUQUINA,Neuquén,-68.9,-38.5,Petrolífero,Extracción Efectiva,SHALE
+YPF,2020,6,2,10.0,1.0,1.0,30,YPF S.A.,OP.Nq.AA-1(h),quintuco,3000,AREA UNO,YAC UNO,NEUQUINA,Neuquén,-68.9,-38.5,Petrolífero,Extracción Efectiva,SHALE
+VOA,2019,1,3,0,0,0,0,VISTA OIL & GAS ARGENTINA SAU,OP.Nq.BB-2,vaca muerta,2800,AREA DOS,YAC DOS,NEUQUINA,Neuquén,-68.9,-38.5,Petrolífero,Extracción Efectiva,SHALE
+VOA,2019,2,3,50.0,5.0,100.0,28,VISTA OIL & GAS ARGENTINA SAU,OP.Nq.BB-2,vaca muerta,2800,AREA DOS,YAC DOS,NEUQUINA,Neuquén,-68.9,-38.5,Petrolífero,Extracción Efectiva,SHALE
+VOA,2022,5,3,40.0,4.0,80.0,31,VISTA ENERGY ARGENTINA SAU,OP.Nq.BB-2,vaca muerta,2800,AREA DOS,YAC DOS,NEUQUINA,Neuquén,-68.9,-38.5,Petrolífero,Extracción Efectiva,SHALE
+YPF,2022,4,5,0,0,0,0,YPF S.A.,OP.Nq.DD-4,vaca muerta,9000,AREA DOS,YAC DOS,NEUQUINA,Neuquén,-60.0,-38.6,Petrolífero,Extracción Efectiva,SHALE
+YPF,2022,5,5,300.0,30.0,5.0,31,YPF S.A.,OP.Nq.DD-4,vaca muerta,9000,AREA DOS,YAC DOS,NEUQUINA,Neuquén,-60.0,-38.6,Petrolífero,Extracción Efectiva,SHALE
+YPF,2010,3,9,0,0,0,0,YPF S.A.,OP.Nq.ZZ-9,vaca muerta,2000,AREA DOS,YAC DOS,NEUQUINA,Neuquén,-68.7,-38.6,Petrolífero,Abandonado,SHALE

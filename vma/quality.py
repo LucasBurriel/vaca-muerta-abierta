@@ -4,7 +4,7 @@ Produces ``informes/calidad-<date>.md`` with tables and ``docs/*.png`` charts:
 wells per dataset and how many cross between datasets (by ``idpozo`` and by sigla at
 several normalisation levels), operator and formation spelling variants, nulls,
 duplicates, impossible ranges, publication lag. Also writes the alias drafts
-``alias/operadoras.csv`` and ``alias/formaciones.csv`` for phase 1 to curate.
+``alias/borradores/*.csv`` (the curated tables in ``alias/*.csv`` are phase 1's).
 
 Everything is computed with DuckDB over the raw CSVs of the latest download; no row is
 modified. Charts use a single hue for magnitude and a fixed categorical order.
@@ -195,8 +195,10 @@ def formation_variants(con: duckdb.DuckDBPyConnection) -> pd.DataFrame:
 
 
 def write_alias_drafts(root: Path, ops: pd.DataFrame, fms: pd.DataFrame) -> None:
-    alias = root / "alias"
-    alias.mkdir(exist_ok=True)
+    # Drafts only: the curated, versioned tables live in alias/*.csv (ADR-012) and are never
+    # overwritten by this report.
+    alias = root / "alias" / "borradores"
+    alias.mkdir(parents=True, exist_ok=True)
     with (alias / "operadoras.csv").open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(["alias", "canonical", "key", "datasets", "status"])

@@ -1,0 +1,5 @@
+sigla,idpozo,empresa,formacion,geojson
+OP.Nq.AA-1(h),1,YPF S.A.,vaca muerta,"{""type"":""Point"",""coordinates"":[-68.9,-38.5]}"
+OP.Nq.BB-2,3,VISTA ENERGY ARGENTINA SAU,vaca muerta,"{""type"":""Point"",""coordinates"":[-68.9,-38.5]}"
+OP.Nq.CC-3,4,YPF S.A.,lajas,"{""type"":""Point"",""coordinates"":[-68.7,-38.6]}"
+OP.Nq.DD-4,5,YPF S.A.,vaca muerta,"{""type"":""Point"",""coordinates"":[-68.6,-38.6]}"

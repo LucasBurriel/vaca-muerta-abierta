@@ -1,79 +1,79 @@
-alias,canonical,key,datasets,wells,status
-vaca muerta,Vaca Muerta,VACA MUERTA,fractura;pozos;produccion_nc,10244,single
-bajo barreal,Bajo Barreal,BAJO BARREAL,fractura;pozos;produccion_nc,9229,single
-comodoro rivadavia,Comodoro Rivadavia,COMODORO RIVADAVIA,fractura;pozos,8924,single
-cañadon seco,Cañadon Seco,CANADON SECO,fractura;pozos;produccion_nc,8516,single
-grupo chubut,Grupo Chubut,CHUBUT,pozos;produccion_nc,8042,single
-mina el carmen,Mina El Carmen,MINA EL CARMEN,fractura;pozos;produccion_nc,4472,single
-quintuco,Quintuco,QUINTUCO,fractura;pozos;produccion_nc,4158,single
-agrio,Agrio,AGRIO,fractura;pozos;produccion_nc,4125,single
-formación improductiva,Formación Improductiva,IMPRODUCTIVA,fractura;pozos;produccion_nc,2993,single
-lajas,Lajas,LAJAS,fractura;pozos;produccion_nc,2815,single
-huitrín,Huitrín,HUITRIN,fractura;pozos,2806,single
-lotena,Lotena,LOTENA,fractura;pozos;produccion_nc,2147,single
-springhill,Springhill,SPRINGHILL,fractura;pozos;produccion_nc,2136,single
-centenario,Centenario,CENTENARIO,pozos;produccion_nc,2037,single
-sierras blancas,Sierras Blancas,SIERRAS BLANCAS,fractura;pozos;produccion_nc,1797,single
-rayoso,Rayoso,RAYOSO,fractura;pozos;produccion_nc,1768,single
-tordillo,Tordillo,TORDILLO,fractura;pozos;produccion_nc,1714,single
-mulichinco,Mulichinco,MULICHINCO,fractura;pozos;produccion_nc,1457,single
-barrancas,Barrancas,BARRANCAS,pozos,1202,single
-salamanca,Salamanca,SALAMANCA,pozos,982,single
-choiyoi,Choiyoi,CHOIYOI,pozos,971,single
-magallanes,Magallanes,MAGALLANES,fractura;pozos;produccion_nc,866,single
-rio blanco,Rio Blanco,RIO BLANCO,pozos,775,single
-precuyo,Precuyo,PRECUYO,fractura;pozos;produccion_nc,755,single
-grupo neuquén,Grupo Neuquén,NEUQUEN,fractura;pozos;produccion_nc,730,single
-conglomerado rojo inferior,Conglomerado Rojo Inferior,CONGLOMERADO ROJO INFERIOR,pozos,721,single
-los molles,Los Molles,LOS MOLLES,fractura;pozos;produccion_nc,719,single
-el trebol,El Trebol,EL TREBOL,fractura;pozos,656,single
-punta rosada,Punta Rosada,PUNTA ROSADA,fractura;pozos;produccion_nc,627,single
-castillo,Castillo,CASTILLO,fractura;pozos,571,single
-loma montosa,Loma Montosa,LOMA MONTOSA,fractura;pozos;produccion_nc,453,single
-challacó,Challacó,CHALLACO,pozos,451,single
-potrerillos,Potrerillos,POTRERILLOS,pozos,356,single
-chachao,Chachao,CHACHAO,fractura;pozos;produccion_nc,313,single
-papagayo,Papagayo,PAPAGAYO,pozos,263,single
-tupambi,Tupambi,TUPAMBI,pozos,224,single
-yacoraite,Yacoraite,YACORAITE,pozos;produccion_nc,209,single
-pozo d-129,Pozo D-129,POZO D 129,fractura;pozos;produccion_nc,198,single
-las cabras,Las Cabras,LAS CABRAS,pozos,187,single
-tarija,Tarija,TARIJA,pozos,164,single
-las peñas,Las Peñas,LAS PENAS,pozos,146,single
-tobífera,Tobífera,TOBIFERA,pozos;produccion_nc,118,single
-basamento,Basamento,BASAMENTO,pozos;produccion_nc,105,single
-quebrada del sapo,Quebrada Del Sapo,QUEBRADA DEL SAPO,pozos,100,single
-glauconitico ,Glauconitico ,GLAUCONITICO,pozos,78,single
-barda negra,Barda Negra,BARDA NEGRA,pozos,62,single
-huamampampa,Huamampampa,HUAMAMPAMPA,pozos,58,single
-tranquitas,Tranquitas,TRANQUITAS,pozos,45,single
-neocomiano,Neocomiano,NEOCOMIANO,pozos,42,single
-catriel,Catriel,CATRIEL,pozos,37,single
-loncoche,Loncoche,LONCOCHE,pozos,35,single
-pircala,Pircala,PIRCALA,pozos,33,single
-ANITA,Anita,ANITA,fractura;pozos;produccion_nc,32,single
-palmar largo,Palmar Largo,PALMAR LARGO,pozos,31,single
-Agua de la Piedra,Agua De La Piedra,AGUA DE LA PIEDRA,pozos,29,single
-divisadero largo,Divisadero Largo,DIVISADERO LARGO,pozos,22,single
-meseta espinosa,Meseta Espinosa,MESETA ESPINOSA,pozos,19,single
-la pilona,La Pilona,LA PILONA,pozos,18,single
-villavicencio,Villavicencio,VILLAVICENCIO,pozos,17,single
-bajada colorada,Bajada Colorada,BAJADA COLORADA,pozos,16,single
-palermo aike,Palermo Aike,PALERMO AIKE,fractura;pozos;produccion_nc,16,single
-patagonia,Patagonia,PATAGONIA,pozos,16,single
-santa rosa,Santa Rosa,SANTA ROSA,pozos,14,single
-los monos,Los Monos,LOS MONOS,pozos,13,single
-la manga,La Manga,LA MANGA,pozos,11,single
-san telmo,San Telmo,SAN TELMO,pozos,11,single
-victor oscuro,Victor Oscuro,VICTOR OSCURO,pozos,11,single
-iquiri,Iquiri,IQUIRI,pozos,9,single
-maiz gordo,Maiz Gordo,MAIZ GORDO,pozos,9,single
-cacheuta,Cacheuta,CACHEUTA,pozos,8,single
-icla,Icla,ICLA,pozos,8,single
-punta bardas,Punta Bardas,PUNTA BARDAS,pozos,8,single
-vulcanitas medanito,Vulcanitas Medanito,VULCANITAS MEDANITO,pozos,4,single
-la tigra,La Tigra,LA TIGRA,pozos,3,single
-Río Seco,Río Seco,RIO SECO,pozos,2,single
-lonco trapial ,Lonco Trapial ,LONCO TRAPIAL,pozos,1,single
-Piedra Clavada,Piedra Clavada,PIEDRA CLAVADA,pozos,1,single
-victor claro,Victor Claro,VICTOR CLARO,pozos,1,single
+variante,canonico,fuente,desde,nota
+vaca muerta,Vaca Muerta,fractura;pozos;produccion_nc,2026-10-31,
+bajo barreal,Bajo Barreal,fractura;pozos;produccion_nc,2026-10-31,
+comodoro rivadavia,Comodoro Rivadavia,fractura;pozos,2026-10-31,
+cañadon seco,Cañadon Seco,fractura;pozos;produccion_nc,2026-10-31,
+grupo chubut,Grupo Chubut,pozos;produccion_nc,2026-10-31,
+mina el carmen,Mina El Carmen,fractura;pozos;produccion_nc,2026-10-31,
+quintuco,Quintuco,fractura;pozos;produccion_nc,2026-10-31,
+agrio,Agrio,fractura;pozos;produccion_nc,2026-10-31,
+formación improductiva,Formación Improductiva,fractura;pozos;produccion_nc,2026-10-31,
+lajas,Lajas,fractura;pozos;produccion_nc,2026-10-31,
+huitrín,Huitrín,fractura;pozos,2026-10-31,
+lotena,Lotena,fractura;pozos;produccion_nc,2026-10-31,
+springhill,Springhill,fractura;pozos;produccion_nc,2026-10-31,
+centenario,Centenario,pozos;produccion_nc,2026-10-31,
+sierras blancas,Sierras Blancas,fractura;pozos;produccion_nc,2026-10-31,
+rayoso,Rayoso,fractura;pozos;produccion_nc,2026-10-31,
+tordillo,Tordillo,fractura;pozos;produccion_nc,2026-10-31,
+mulichinco,Mulichinco,fractura;pozos;produccion_nc,2026-10-31,
+barrancas,Barrancas,pozos,2026-10-31,
+salamanca,Salamanca,pozos,2026-10-31,
+choiyoi,Choiyoi,pozos,2026-10-31,
+magallanes,Magallanes,fractura;pozos;produccion_nc,2026-10-31,
+rio blanco,Rio Blanco,pozos,2026-10-31,
+precuyo,Precuyo,fractura;pozos;produccion_nc,2026-10-31,
+grupo neuquén,Grupo Neuquén,fractura;pozos;produccion_nc,2026-10-31,
+conglomerado rojo inferior,Conglomerado Rojo Inferior,pozos,2026-10-31,
+los molles,Los Molles,fractura;pozos;produccion_nc,2026-10-31,
+el trebol,El Trebol,fractura;pozos,2026-10-31,
+punta rosada,Punta Rosada,fractura;pozos;produccion_nc,2026-10-31,
+castillo,Castillo,fractura;pozos,2026-10-31,
+loma montosa,Loma Montosa,fractura;pozos;produccion_nc,2026-10-31,
+challacó,Challacó,pozos,2026-10-31,
+potrerillos,Potrerillos,pozos,2026-10-31,
+chachao,Chachao,fractura;pozos;produccion_nc,2026-10-31,
+papagayo,Papagayo,pozos,2026-10-31,
+tupambi,Tupambi,pozos,2026-10-31,
+yacoraite,Yacoraite,pozos;produccion_nc,2026-10-31,
+pozo d-129,Pozo D-129,fractura;pozos;produccion_nc,2026-10-31,
+las cabras,Las Cabras,pozos,2026-10-31,
+tarija,Tarija,pozos,2026-10-31,
+las peñas,Las Peñas,pozos,2026-10-31,
+tobífera,Tobífera,pozos;produccion_nc,2026-10-31,
+basamento,Basamento,pozos;produccion_nc,2026-10-31,
+quebrada del sapo,Quebrada del Sapo,pozos,2026-10-31,
+glauconitico,Glauconitico,pozos,2026-10-31,grafia con espacio final en la fuente
+barda negra,Barda Negra,pozos,2026-10-31,
+huamampampa,Huamampampa,pozos,2026-10-31,
+tranquitas,Tranquitas,pozos,2026-10-31,
+neocomiano,Neocomiano,pozos,2026-10-31,
+catriel,Catriel,pozos,2026-10-31,
+loncoche,Loncoche,pozos,2026-10-31,
+pircala,Pircala,pozos,2026-10-31,
+ANITA,Anita,fractura;pozos;produccion_nc,2026-10-31,
+palmar largo,Palmar Largo,pozos,2026-10-31,
+Agua de la Piedra,Agua de la Piedra,pozos,2026-10-31,
+divisadero largo,Divisadero Largo,pozos,2026-10-31,
+meseta espinosa,Meseta Espinosa,pozos,2026-10-31,
+la pilona,La Pilona,pozos,2026-10-31,
+villavicencio,Villavicencio,pozos,2026-10-31,
+bajada colorada,Bajada Colorada,pozos,2026-10-31,
+palermo aike,Palermo Aike,fractura;pozos;produccion_nc,2026-10-31,
+patagonia,Patagonia,pozos,2026-10-31,
+santa rosa,Santa Rosa,pozos,2026-10-31,
+los monos,Los Monos,pozos,2026-10-31,
+la manga,La Manga,pozos,2026-10-31,
+san telmo,San Telmo,pozos,2026-10-31,
+victor oscuro,Victor Oscuro,pozos,2026-10-31,
+iquiri,Iquiri,pozos,2026-10-31,
+maiz gordo,Maiz Gordo,pozos,2026-10-31,
+cacheuta,Cacheuta,pozos,2026-10-31,
+icla,Icla,pozos,2026-10-31,
+punta bardas,Punta Bardas,pozos,2026-10-31,
+vulcanitas medanito,Vulcanitas Medanito,pozos,2026-10-31,
+la tigra,La Tigra,pozos,2026-10-31,
+Río Seco,Río Seco,pozos,2026-10-31,
+lonco trapial,Lonco Trapial,pozos,2026-10-31,grafia con espacio final en la fuente
+Piedra Clavada,Piedra Clavada,pozos,2026-10-31,
+victor claro,Victor Claro,pozos,2026-10-31,
