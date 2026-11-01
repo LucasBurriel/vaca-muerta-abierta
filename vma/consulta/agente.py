@@ -1,0 +1,436 @@
+"""The question-answering loop (ADR-025, ADR-028).
+
+A *proveedor* turns (system, messages, tools) into one assistant message in the Claude API shape; the loop
+runs the tools the message asks for, appends the results, and repeats until the model answers in text. Two
+providers: :class:`ProveedorAnthropic` (Claude through the official SDK, streaming, adaptive thinking) and
+:class:`ProveedorMock`, a model-free planner that picks tools from keywords and writes an answer from their
+results, so the whole path (tools -> loop -> validator -> transcript) runs in tests and in CI without a key.
+
+Every text answer goes through :func:`vma.consulta.validador.validar`: a number that no tool returned sends the
+model one correction message; a second failure is shown with a warning, never silently.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any, Protocol
+
+from vma.consulta import herramientas as H
+from vma.consulta.datos import Datos
+from vma.consulta.validador import Validacion, validar
+
+MODELO_DEFAULT = "claude-opus-5-5"
+ESFUERZO_DEFAULT = "medium"
+MAX_TURNOS = 12
+MAX_TOKENS = 16000
+
+SYSTEM = """Sos el asistente del observatorio abierto de Vaca Muerta: respondés preguntas sobre las tablas publicadas
+(pozos, indicadores, curvas_tipo) que salen de los datos públicos por pozo de la Secretaría de Energía de Argentina
+(Capítulo IV). Hablás en castellano rioplatense, técnico y directo, como un ingeniero de reservorios.
+
+Reglas, en orden de importancia:
+
+1. **Sin cita no hay número.** Cada número que escribís sale de un resultado de herramienta de esta conversación
+   y va acompañado de su cita: tabla.columna y el filtro aplicado (por ejemplo: "mediana 0,062 m³/d por m
+   [indicadores.ip90_petroleo_m3_d_por_m; formacion = Vaca Muerta, ventana = petroleo, cohorte = 2024, n = 48]").
+   No calculés promedios, porcentajes, diferencias ni totales que la herramienta no devolvió; si hace falta, pedí
+   otra herramienta o decí que no está calculado. No redondeés más allá de 2-3 cifras significativas.
+2. **Sin dato porque…** Cuando un indicador es nulo, decís el motivo que trae el resultado (`sin_dato_porque`,
+   `exclusiones`, flags) y nunca lo reemplazás por cero ni lo inventás.
+3. **Días efectivos vs calendario.** Las tasas (IP30/90/180, curvas tipo) son por día efectivo de producción, no
+   por día calendario; los acumulados son por meses calendario. Aclaralo la primera vez que das una tasa.
+4. **Contexto honesto.** Repetí el `n` de cada estadístico; marcá como débil lo que tenga n < 5 o esté en
+   `grupos_chicos`; si la herramienta advierte que mezcla ventanas o formaciones, decilo o filtrá mejor.
+5. **No inventás.** Si las herramientas no alcanzan para responder, decís qué falta y qué sí se puede responder.
+   No conocés nada de la cuenca que no esté en las tablas; opiniones de la industria, no.
+6. Flujo típico: para un pozo, `buscar_pozo` y después `ficha_pozo`; para comparar operadoras/ventanas/cohortes
+   de una formación, `comparar_grupo` o `ranking` (filtrá por ventana para comparar pares); para la evolución
+   mensual, `curva_tipo`; si no conocés una columna, `describir_tabla`; para fechar la respuesta, `metadatos`.
+   Las operadoras son filas del dataset público y se tratan todas igual.
+
+Terminá con una línea "Datos: descargados el <fecha_datos>, maestro <version_maestro>, fuente <fuente>" tomada de
+cualquier resultado de herramienta."""
+
+
+# --- messages in the Claude API shape -------------------------------------------------------------------------
+
+
+@dataclass
+class Llamada:
+    herramienta: str
+    entrada: dict
+    salida: Any
+    error: bool = False
+    segundos: float = 0.0
+
+
+@dataclass
+class Respuesta:
+    pregunta: str
+    texto: str
+    llamadas: list[Llamada] = field(default_factory=list)
+    validacion: Validacion | None = None
+    reintentos: int = 0
+    turnos: int = 0
+    proveedor: str = ""
+    modelo: str = ""
+    uso: dict = field(default_factory=dict)
+
+    def transcript(self) -> dict:
+        return {
+            "pregunta": self.pregunta,
+            "respuesta": self.texto,
+            "herramientas": [
+                {"herramienta": c.herramienta, "entrada": c.entrada, "error": c.error} for c in self.llamadas
+            ],
+            "validacion": None if self.validacion is None else self.validacion.mensaje(),
+            "reintentos": self.reintentos,
+            "turnos": self.turnos,
+            "proveedor": self.proveedor,
+            "modelo": self.modelo,
+            "uso": self.uso,
+        }
+
+
+class Proveedor(Protocol):
+    nombre: str
+    modelo: str
+
+    def crear(self, system: str, messages: list[dict], tools: list[dict]) -> dict:
+        """Return ``{"content": [blocks...], "stop_reason": str, "usage": {...}}``."""
+        ...
+
+
+# --- Anthropic ----------------------------------------------------------------------------------------------
+
+
+class ProveedorAnthropic:
+    """Claude through the official SDK: streaming (long answers never hit the HTTP timeout), adaptive thinking,
+    effort as the only depth control. Thinking blocks are passed back unchanged (``model_dump``)."""
+
+    nombre = "anthropic"
+
+    def __init__(self, modelo: str = MODELO_DEFAULT, esfuerzo: str = ESFUERZO_DEFAULT, cliente=None):
+        if cliente is None:
+            import anthropic  # optional dependency: pip install -e ".[agente]"
+
+            cliente = anthropic.Anthropic()
+        self.cliente = cliente
+        self.modelo = modelo
+        self.esfuerzo = esfuerzo
+
+    def crear(self, system: str, messages: list[dict], tools: list[dict]) -> dict:
+        with self.cliente.messages.stream(
+            model=self.modelo,
+            max_tokens=MAX_TOKENS,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            tools=tools,
+            messages=messages,
+            thinking={"type": "adaptive"},
+            output_config={"effort": self.esfuerzo},
+        ) as stream:
+            msg = stream.get_final_message()
+        content = [b.model_dump(exclude_none=True) for b in msg.content]
+        uso = msg.usage.model_dump(exclude_none=True) if msg.usage else {}
+        return {"content": content, "stop_reason": msg.stop_reason, "usage": uso}
+
+
+# --- Mock: no model -----------------------------------------------------------------------------------------
+
+_SIGLA = re.compile(
+    r"\b[A-Za-z]{1,5}\.[A-Za-z]{2,3}\.[A-Za-z]{1,6}(?:\.\s?[A-Za-z]{1,4})?[-\s]?\d{1,5}(?:\([a-z]{1,2}\))?"
+)
+_COHORTE = re.compile(r"\b(20[0-3]\d)\b")
+_VENTANAS = {"petróleo": "petroleo", "petroleo": "petroleo", "gas": "gas", "condensado": "volatil_condensado"}
+
+
+class ProveedorMock:
+    """A scripted stand-in for the model: keyword planning, then an answer written only from tool results.
+
+    ``con_numero_inventado=True`` adds a number no tool returned to the first answer, so the validator's retry
+    path can be exercised end to end without a model.
+    """
+
+    nombre = "mock"
+    modelo = "mock"
+
+    def __init__(self, con_numero_inventado: bool = False):
+        self.con_numero_inventado = con_numero_inventado
+        self._id = 0
+
+    def _tool_use(self, name: str, entrada: dict) -> dict:
+        self._id += 1
+        return {"type": "tool_use", "id": f"mock_{self._id}", "name": name, "input": entrada}
+
+    @staticmethod
+    def _plan(pregunta: str, tools: list[dict]) -> list[tuple[str, dict]]:
+        q = pregunta.lower()
+        nombres = {t["name"] for t in tools}
+        plan: list[tuple[str, dict]] = []
+        sigla = _SIGLA.search(pregunta)
+        cohortes = [int(c) for c in _COHORTE.findall(pregunta)]
+        ventana = next((v for k, v in _VENTANAS.items() if k in q), None)
+        formacion = "Vaca Muerta"
+        for f in ("lajas", "mulichinco", "los molles", "punta rosada", "precuyo", "quintuco", "vaca muerta"):
+            if f in q:
+                formacion = f.title()
+        if sigla:
+            plan.append(("buscar_pozo", {"texto": sigla.group(0)}))
+        elif any(w in q for w in ("fecha", "metadatos", "descarg", "versión", "version")):
+            plan.append(("metadatos", {}))
+        elif "curva" in q and "curva_tipo" in nombres:
+            nivel = "cohorte_formacion_ventana" if ventana else "cohorte_formacion"
+            claves = {"cohorte": cohortes[0] if cohortes else 2022, "formacion": formacion}
+            if ventana:
+                claves["ventana"] = ventana
+            plan.append(("curva_tipo", {"nivel": nivel, "claves": claves, "mes_max": 12}))
+        elif any(w in q for w in ("ranking", "mejor", "peor", "ordena", "top")) and "ranking" in nombres:
+            filtros: dict = {"formacion": formacion}
+            if ventana:
+                filtros["ventana"] = ventana
+            if cohortes:
+                filtros["cohorte"] = cohortes[0]
+            plan.append(("ranking", {"filtros": filtros, "top": 5}))
+        elif (
+            any(w in q for w in ("compar", "operadora", "ventana", "cohorte", "rama", "etapa"))
+            and "comparar_grupo" in nombres
+        ):
+            entrada: dict = {"formacion": formacion}
+            if cohortes:
+                entrada["cohorte"] = cohortes[0]
+            if "ventana" in q:
+                entrada["dimension"] = "ventana"
+            elif "cohorte" in q and not cohortes:
+                entrada["dimension"] = "cohorte"
+            if "rama" in q:
+                entrada["metrica"] = "rama_m"
+            elif "etapa" in q:
+                entrada["metrica"] = "etapas"
+            plan.append(("comparar_grupo", entrada))
+        elif "tabla" in q or "columna" in q:
+            t = next((t for t in ("curvas_tipo", "indicadores", "pozos") if t in q), "indicadores")
+            plan.append(("describir_tabla", {"tabla": t}))
+        else:
+            plan.append(("metadatos", {}))
+        return plan
+
+    @staticmethod
+    def _resultados(messages: list[dict]) -> list[tuple[dict, dict]]:
+        """``[(tool_use block, parsed result)...]`` for every tool call so far."""
+        usos: dict[str, dict] = {}
+        out = []
+        for m in messages:
+            if isinstance(m.get("content"), str):
+                continue
+            for b in m["content"]:
+                if b.get("type") == "tool_use":
+                    usos[b["id"]] = b
+                elif b.get("type") == "tool_result":
+                    try:
+                        parsed = json.loads(b["content"])
+                    except (TypeError, ValueError):
+                        parsed = {"error": b["content"]}
+                    out.append((usos.get(b["tool_use_id"], {}), parsed))
+        return out
+
+    def crear(self, system: str, messages: list[dict], tools: list[dict]) -> dict:
+        pregunta = next(
+            m["content"] for m in messages if m["role"] == "user" and isinstance(m["content"], str)
+        )
+        resultados = self._resultados(messages)
+        corregido = any(
+            m["role"] == "user" and isinstance(m["content"], str) and m["content"].startswith("Validador:")
+            for m in messages
+        )
+        if not resultados:
+            content = [self._tool_use(n, e) for n, e in self._plan(pregunta, tools)]
+            return {"content": content, "stop_reason": "tool_use", "usage": {}}
+        # a search that found wells -> fetch the first one's sheet
+        ultimo_uso, ultimo = resultados[-1]
+        if ultimo_uso.get("name") == "buscar_pozo" and ultimo.get("datos", {}).get("pozos"):
+            clave = ultimo["datos"]["pozos"][0]["sigla_clave"]
+            return {
+                "content": [self._tool_use("ficha_pozo", {"sigla_clave": clave})],
+                "stop_reason": "tool_use",
+                "usage": {},
+            }
+        texto = self._redactar(resultados, inventar=self.con_numero_inventado and not corregido)
+        return {"content": [{"type": "text", "text": texto}], "stop_reason": "end_turn", "usage": {}}
+
+    @staticmethod
+    def _cita(r: dict) -> str:
+        c = r.get("cita", {})
+        filtros = ", ".join(f"{k} = {v}" for k, v in c.get("filtros", {}).items())
+        return (
+            f"[{c.get('tabla')}: {', '.join(c.get('columnas', [])[:4])}{'; ' + filtros if filtros else ''}]"
+        )
+
+    def _redactar(self, resultados: list[tuple[dict, dict]], inventar: bool) -> str:
+        partes = [
+            "(respuesta del proveedor mock: sin modelo, armada sólo con los resultados de las herramientas)"
+        ]
+        pie = None
+        for uso, r in resultados:
+            nombre = uso.get("name", "?")
+            if "error" in r and "datos" not in r:
+                partes.append(f"- {nombre}: error — {r['error']}")
+                continue
+            d = r.get("datos", {})
+            cita = self._cita(r)
+            if nombre == "ficha_pozo":
+                i, m = d.get("indicadores", {}), d.get("maestro", {})
+                partes.append(
+                    f"- Pozo {m.get('sigla')} ({i.get('operadora') or m.get('operadora')}, {i.get('formacion')}, "
+                    f"cohorte {i.get('cohorte')}, ventana {i.get('ventana')}): rama_m = {i.get('rama_m')}, etapas = "
+                    f"{i.get('etapas')}, ip90_petroleo_m3_d = {i.get('ip90_petroleo_m3_d')} m³/d por día efectivo, "
+                    f"ip90_petroleo_m3_d_por_m = {i.get('ip90_petroleo_m3_d_por_m')}, gor12_m3_m3 = {i.get('gor12_m3_m3')} {cita}"
+                )
+                sin = d.get("sin_dato_porque", {})
+                if sin:
+                    muestra = sorted(sin.items(), key=lambda kv: "flags" not in kv[1])[:4]
+                    partes.append("  Sin dato porque: " + "; ".join(f"{k}: {v}" for k, v in muestra))
+            elif nombre in ("ranking", "comparar_grupo"):
+                filas = d.get("ranking") or d.get("grupos") or []
+                partes.append(f"- {nombre} de {d.get('metrica')} ({d.get('unidad')}) {cita}:")
+                for f in filas[:5]:
+                    partes.append(
+                        f"  · {f.get('grupo')}: mediana {f.get('mediana')}, P25 {f.get('p25')}, P75 {f.get('p75')}, "
+                        f"n = {f.get('n_con_dato')} de {f.get('n_pozos')}"
+                    )
+                if d.get("sin_dato_porque"):
+                    partes.append(
+                        "  Sin dato porque: "
+                        + "; ".join(f"{k}: {v}" for k, v in d["sin_dato_porque"].items())
+                    )
+            elif nombre == "curva_tipo":
+                partes.append(f"- Curva tipo de {d.get('tasa')} por día efectivo {cita}:")
+                for f in d.get("meses", [])[:6]:
+                    partes.append(
+                        f"  · mes {f.get('mes')}: P50 {f.get('p50')} (P10 {f.get('p10')}, P90 {f.get('p90')}), n = {f.get('n_pozos')}"
+                        + (f" — {f['sin_dato_porque']}" if f.get("sin_dato_porque") else "")
+                    )
+            elif nombre == "buscar_pozo":
+                partes.append(f"- buscar_pozo: {d.get('n')} coincidencia(s) {cita}")
+            elif nombre == "describir_tabla":
+                partes.append(
+                    f"- {d.get('tabla')}: {d.get('filas')} filas, {d.get('n_columnas')} columnas; doc {d.get('doc')} {cita}"
+                )
+            elif nombre == "metadatos":
+                tablas = ", ".join(f"{t} {v['filas']} filas" for t, v in d.get("tablas", {}).items())
+                partes.append(f"- Datos: {tablas} {cita}")
+            else:
+                partes.append(f"- {nombre}: {json.dumps(d, ensure_ascii=False)[:400]} {cita}")
+            for e in r.get("exclusiones", []):
+                partes.append(f"  Exclusión: {e}")
+            if r.get("notas"):
+                partes.append(f"  Nota: {r['notas'][0]}")
+            pie = f"Datos: descargados el {r.get('fecha_datos')}, maestro {r.get('version_maestro')}, fuente {r.get('fuente')}"
+        if inventar:
+            partes.append("- El promedio general sería de 123456,7 m³/d (estimación propia).")
+        if pie:
+            partes.append(pie)
+        return "\n".join(partes)
+
+
+# --- the loop ---------------------------------------------------------------------------------------------------
+
+
+def _json(obj: Any) -> str:
+    return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def responder(
+    pregunta: str,
+    d: Datos,
+    proveedor: Proveedor,
+    con_sql: bool = False,
+    historial: list[dict] | None = None,
+    al_llamar: Callable[[Llamada], None] | None = None,
+    max_turnos: int = MAX_TURNOS,
+    reintentos_validador: int = 1,
+) -> Respuesta:
+    """Answer one question. ``historial`` (previous turns, API shape) is extended in place for chat mode."""
+    tools = H.definiciones(con_sql)
+    messages = historial if historial is not None else []
+    messages.append({"role": "user", "content": pregunta})
+    resp = Respuesta(pregunta=pregunta, texto="", proveedor=proveedor.nombre, modelo=proveedor.modelo)
+    resultados: list[Any] = []
+    permitidos: list[str] = [pregunta]
+    uso_total: dict[str, int] = {}
+    for _ in range(max_turnos):
+        resp.turnos += 1
+        msg = proveedor.crear(SYSTEM, messages, tools)
+        for k, v in (msg.get("usage") or {}).items():
+            if isinstance(v, int):
+                uso_total[k] = uso_total.get(k, 0) + v
+        messages.append({"role": "assistant", "content": msg["content"]})
+        usos = [b for b in msg["content"] if b.get("type") == "tool_use"]
+        if msg.get("stop_reason") == "refusal":
+            resp.texto = "El modelo rechazó la consulta (stop_reason = refusal)."
+            break
+        if usos:
+            bloques = []
+            for u in usos:
+                t0 = time.perf_counter()
+                try:
+                    salida = H.ejecutar(d, u["name"], u.get("input") or {}, con_sql=con_sql)
+                    error = False
+                except H.ErrorHerramienta as e:
+                    salida, error = {"error": str(e)}, True
+                llamada = Llamada(u["name"], u.get("input") or {}, salida, error, time.perf_counter() - t0)
+                resp.llamadas.append(llamada)
+                if al_llamar:
+                    al_llamar(llamada)
+                resultados.append(salida)
+                permitidos.append(_json(u.get("input") or {}))
+                bloques.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": u["id"],
+                        "content": _json(salida),
+                        "is_error": error,
+                    }
+                )
+            messages.append({"role": "user", "content": bloques})
+            continue
+        texto = "\n".join(b.get("text", "") for b in msg["content"] if b.get("type") == "text").strip()
+        val = validar(texto, resultados, permitidos)
+        resp.validacion = val
+        if not val.ok and resp.reintentos < reintentos_validador:
+            resp.reintentos += 1
+            messages.append({"role": "user", "content": "Validador: " + val.mensaje()})
+            continue
+        resp.texto = (
+            texto
+            if val.ok
+            else f"ATENCION, número sin cita ({', '.join(val.sin_cita)}); respuesta no verificada:\n\n{texto}"
+        )
+        break
+    else:
+        resp.texto = f"Sin respuesta en {max_turnos} turnos."
+    resp.uso = uso_total
+    return resp
+
+
+def elegir_proveedor(
+    nombre: str = "auto", modelo: str = MODELO_DEFAULT, esfuerzo: str = ESFUERZO_DEFAULT
+) -> Proveedor:
+    """``auto``: Anthropic when ``ANTHROPIC_API_KEY`` is set, else the mock (and say so on stderr)."""
+    if nombre == "auto":
+        nombre = "anthropic" if os.environ.get("ANTHROPIC_API_KEY") else "mock"
+        if nombre == "mock":
+            import sys
+
+            print("ANTHROPIC_API_KEY no está definida: uso el proveedor mock (sin modelo).", file=sys.stderr)
+    if nombre == "mock":
+        return ProveedorMock()
+    if nombre == "mock-sin-cita":
+        return ProveedorMock(con_numero_inventado=True)
+    if nombre == "anthropic":
+        return ProveedorAnthropic(modelo=modelo, esfuerzo=esfuerzo)
+    raise ValueError(f"proveedor desconocido: {nombre!r} (auto, anthropic, mock, mock-sin-cita)")

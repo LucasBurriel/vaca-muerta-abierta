@@ -18,7 +18,30 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 | **F1 · Maestro de pozos** | una fila por pozo físico, todas las grafías de su sigla como alias, operadora y formación normalizadas con tablas versionadas, coordenadas validadas, rama con precedencia explícita, primera producción calculada; publicado como CSV + Parquet con linaje y flags por fila | **hecha** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
 | **F2 · Indicadores** | una fila por pozo: IP30/90/180 en días efectivos, acumulados a 6/12/24 meses, todo por metro de rama, GOR, corte de agua, ventana de fluido, flags y linaje; curvas tipo P10/P50/P90 por cohorte × formación (× ventana, × operadora) con `n_pozos`, publicadas con y sin outliers | **hecha** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
 | **F3 · Sitio** | explorador estático: tabla de pozos con celdas "sin dato porque…", curvas tipo P10/P50/P90 con `n`, mapa Leaflet, página de método; JSON pre-agregados por el pipeline, regenerado cada mes por CI y publicado en GitHub Pages | **hecha** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
-| F4 · Preguntas en lenguaje natural | un agente con herramientas de solo lectura sobre las tablas publicadas; ningún número sin su consulta | siguiente |
+| **F4 · Preguntas en lenguaje natural** | agente local (`agente.py`, CLI y chat) y servidor MCP (`mcp_server.py`) sobre siete herramientas tipadas de solo lectura; cada resultado trae su cita (tabla, columnas, filtros, regla); un validador rechaza cualquier número que las herramientas no devolvieron; funciona con el snapshot JSON commiteado o con las tablas Parquet | **hecha** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
+
+## Preguntarle a los datos (F4, 01-11-2026)
+
+```
+$ python agente.py "¿Qué operadora tiene la mejor mediana de IP90 de petróleo por metro en Vaca Muerta, ventana de petróleo, cohorte 2024?"
+  -> ranking({"filtros": {"formacion": "Vaca Muerta", "ventana": "petroleo", "cohorte": 2024}, "top": 5})
+  · PHOENIX GLOBAL RESOURCES S.A.: mediana 0.06645, P25 0.0516, P75 0.08425, n = 10 de 10
+  · VISTA ENERGY ARGENTINA SAU: mediana 0.06231, P25 0.0548, P75 0.07547, n = 48 de 50
+    [indicadores.ip90_petroleo_m3_d_por_m; formacion = Vaca Muerta, ventana = petroleo, cohorte = 2024, n_min = 5]
+  Sin dato porque: flags sin_rama_sin_fractura: 25; flags rama_corta: 1
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+El modelo (`claude-opus-5-5`; `--proveedor mock` corre el mismo circuito sin modelo) nunca escribe SQL contra los
+datos: elige entre siete herramientas de solo lectura (`metadatos`, `describir_tabla`, `buscar_pozo`, `ficha_pozo`,
+`comparar_grupo`, `ranking`, `curva_tipo`), cada una una función testeada que arma su consulta desde listas permitidas y
+devuelve `{datos, cita, exclusiones, notas, fecha_datos, version_maestro, fuente}`. El prompt exige la cita al lado de
+cada número y el "sin dato porque…" en cada nulo; un **validador** comprueba después que cada número de la respuesta
+exista en algún resultado de herramienta del turno y, si no, hace reescribir la respuesta una vez (ADR-027). `--sql`
+habilita `sql_solo_lectura` (sólo SELECT, tres tablas, LIMIT y timeout forzados; riesgo documentado en ADR-025). Corre
+sobre el snapshot `site/data/` de un clon recién bajado y toma las tablas Parquet cuando están (ADR-026). Las mismas
+herramientas son un **servidor MCP** para Claude Desktop / Claude Code (`python mcp_server.py`; configuración en
+[`docs/agente.md`](docs/agente.md)). Transcripciones: [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md).
 
 ## El sitio (F3, 31-10-2026)
 
@@ -104,7 +127,7 @@ Informe completo: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 94 tests, sin red, sin datos
+python -m pytest -q            # 134 tests, sin red, sin datos, sin modelo
 
 python pipeline.py sources     # el catálogo (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<hoy>/ + manifest.json (URL, bytes, sha256, last_modified de CKAN)
@@ -116,9 +139,15 @@ python pipeline.py indicadores # data/publicado/<hoy>/indicadores.{csv,parquet} 
 python pipeline.py curvas      # data/publicado/<hoy>/curvas_tipo.{csv,parquet} + informes/indicadores-<hoy>.md + docs/indicadores-*.png
 python pipeline.py site        # site/data/*.json (+ meta.json) para el sitio estático
 cd site && python -m http.server 8000   # abrir http://localhost:8000
+
+pip install -e ".[dev,agente]"  # F4: anthropic + mcp
+export ANTHROPIC_API_KEY=...    # sin clave, el agente usa el proveedor mock (sin modelo) y lo avisa
+python agente.py "¿Cómo es la curva tipo de Vaca Muerta 2022 en la ventana de petróleo?"
+python agente.py --chat        # conversación; --proveedor mock, --fuente json, --sql, --json
+python mcp_server.py           # servidor MCP (stdio) para Claude Desktop / Claude Code
 ```
 
-Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib`. Los datos crudos nunca se versionan; el manifiesto
+Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib` (+ `anthropic`, `mcp` para el agente). Los datos crudos nunca se versionan; el manifiesto
 es lo que hace comparables dos descargas.
 
 ## Reglas del repositorio
@@ -134,7 +163,8 @@ es lo que hace comparables dos descargas.
 Las decisiones (nombre, alcance, clave de pozo, unidades, relación con `capiv`, precedencia de la rama, política de
 alias, fechas de relleno, formato de publicación, grano de los indicadores, tasas por día efectivo, mínimo de pozos,
 regla de outliers, umbral de rama, ventana de fluido, stack del sitio, JSON vs Parquet en el navegador, recortes del
-sitio, cadencia mensual) están en [docs/decisiones.md](docs/decisiones.md).
+sitio, cadencia mensual, agente local + MCP sin SQL libre, doble fuente Parquet/JSON, validador de citas, modelo y
+mock) están en [docs/decisiones.md](docs/decisiones.md).
 
 ## Licencia
 

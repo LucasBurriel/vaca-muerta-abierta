@@ -18,7 +18,44 @@ This repository builds an **open observatory** on top of it, in phases that each
 | **F1 · Well master** | one row per physical well, every spelling of its sigla as alias, operator and formation normalised with versioned alias tables, coordinates validated, lateral length with explicit precedence, first production computed; published as CSV + Parquet with per-row lineage and flags | **done** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
 | **F2 · Indicators** | one row per well: IP30/90/180 in producing days, cumulatives at 6/12/24 months, everything per metre of lateral, GOR, water cut, fluid window, flags and lineage; type curves P10/P50/P90 by cohort × formation (× window, × operator) with `n_pozos`, published with and without outliers | **done** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
 | **F3 · Site** | static explorer: wells table with "no data because…" cells, type curves P10/P50/P90 with `n`, Leaflet map, method page; pre-aggregated JSON from the pipeline, rebuilt monthly by CI and deployed to GitHub Pages | **done** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
-| F4 · Questions in natural language | an agent with read-only tools over the published tables; no number without its query | next |
+| **F4 · Ask it questions** | a local agent (`agente.py`, CLI + chat) and an MCP server (`mcp_server.py`) over seven typed, read-only tools on the published tables; every result carries its citation (table, columns, filters, rule); a validator rejects any number the tools did not return; works on the committed JSON snapshot or on the Parquet tables | **done** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
+
+## Ask it questions (F4, 2026-11-01)
+
+```
+$ python agente.py "¿Qué operadora tiene la mejor mediana de IP90 de petróleo por metro en Vaca Muerta, ventana de petróleo, cohorte 2024?"
+  -> ranking({"filtros": {"formacion": "Vaca Muerta", "ventana": "petroleo", "cohorte": 2024}, "top": 5})
+
+  · PHOENIX GLOBAL RESOURCES S.A.: mediana 0.06645, P25 0.0516, P75 0.08425, n = 10 de 10
+  · VISTA ENERGY ARGENTINA SAU: mediana 0.06231, P25 0.0548, P75 0.07547, n = 48 de 50
+  · SHELL ARGENTINA S.A.: mediana 0.04888, P25 0.03063, P75 0.06415, n = 22 de 22
+    [indicadores.ip90_petroleo_m3_d_por_m; formacion = Vaca Muerta, ventana = petroleo, cohorte = 2024, en_alcance, n_min = 5]
+  Sin dato porque: flags sin_rama_sin_fractura: 25; flags rama_corta: 1
+  Exclusión: 3 grupo(s) con menos de 5 pozos con dato quedan fuera del ranking (ADR-017)
+  Nota: las tasas son por día efectivo de producción (tef), no por día calendario (ADR-016)
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+
+[validador: ok: todos los números de la respuesta salen de una herramienta]
+```
+
+The model (`claude-opus-5-5` by default; `--proveedor mock` runs the same loop without a model) never writes SQL
+against the data: it chooses among seven read-only tools, `metadatos` · `describir_tabla` · `buscar_pozo` ·
+`ficha_pozo` · `comparar_grupo` · `ranking` · `curva_tipo`, each a tested function that builds its own query from
+allowlists and returns `{datos, cita: {tabla, columnas, filtros, regla_doc}, exclusiones, notas, fecha_datos,
+version_maestro, fuente}`. The system prompt asks for a citation after every number and a "sin dato porque…" for every
+null; a **validator** then checks that every number in the answer exists in a tool result of that turn (with rounding)
+and makes the model redo the answer once if not (ADR-027). `--sql` opts into `sql_solo_lectura` (SELECT only, three
+tables, LIMIT and timeout forced, documented as a risk in ADR-025). The agent works on a fresh clone through the
+committed `site/data/` snapshot and picks up the Parquet tables when they are built (ADR-026).
+
+The same tools are an **MCP server** for Claude Desktop / Claude Code:
+
+```json
+{"mcpServers": {"vaca-muerta-abierta": {"command": "python", "args": ["/path/to/vaca-muerta-abierta/mcp_server.py"]}}}
+```
+
+Details, tool table and the transcripts of five questions: [`docs/agente.md`](docs/agente.md),
+[`docs/ejemplos-agente.md`](docs/ejemplos-agente.md).
 
 ## The site (F3, 2026-10-31)
 
@@ -115,7 +152,7 @@ Full report: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md).
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 94 tests, no network, no data needed
+python -m pytest -q            # 134 tests, no network, no data, no model needed
 
 python pipeline.py sources     # the catalogue (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<today>/ + manifest.json (URL, bytes, sha256, CKAN last_modified)
@@ -127,9 +164,15 @@ python pipeline.py indicadores # data/publicado/<today>/indicadores.{csv,parquet
 python pipeline.py curvas      # data/publicado/<today>/curvas_tipo.{csv,parquet} + informes/indicadores-<today>.md + docs/indicadores-*.png
 python pipeline.py site        # site/data/*.json (+ meta.json) for the static site, from the latest published tables
 cd site && python -m http.server 8000   # open http://localhost:8000
+
+pip install -e ".[dev,agente]"  # F4: anthropic + mcp
+export ANTHROPIC_API_KEY=...    # without it the agent runs the model-free mock and says so
+python agente.py "¿Cómo es la curva tipo de Vaca Muerta 2022 en la ventana de petróleo?"
+python agente.py --chat        # multi-turn; --proveedor mock, --fuente json, --sql, --json
+python mcp_server.py           # MCP over stdio for Claude Desktop / Claude Code
 ```
 
-Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib`. Raw data is never committed; the manifest is what
+Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib` (+ `anthropic`, `mcp` for the agent). Raw data is never committed; the manifest is what
 makes two downloads comparable. The site needs no Node and no server beyond a static file server.
 
 GitHub Pages for a fork: enable it once with build type *GitHub Actions* (Settings → Pages, or
@@ -155,22 +198,27 @@ vma/
   curvas.py           F2: type curves P10/P50/P90/mean by cohort × formation (× window, × operator), min 5 wells
   informe_indicadores.py  the F2 report and its four charts
   site.py             F3: pre-aggregated JSON for the site (pozos, curvas per level, resumen, meta with manifest hashes)
+  consulta/           F4: datos.py (DuckDB views over Parquet or site JSON) · herramientas.py (the seven tools + opt-in SQL,
+                      every result with its citation) · validador.py (no number without a tool result) · agente.py (loop, providers)
+agente.py             ask a question or chat; mcp_server.py  the same tools as an MCP server (stdio)
 site/                 the static site: index · explorador · curvas · mapa · metodo (.html), js/, css/, data/ (generated, committed)
-.github/workflows/    tests.yml (every push, no data) · publish.yml (monthly + manual: download → tables → site → GitHub Pages)
+.github/workflows/    tests.yml (every push, no data; runs the mock agent) · publish.yml (monthly + manual: download → tables → site → GitHub Pages)
 docs/
   fuentes.md          every dataset: URL, licence, grain, size, last data, units as published
-  decisiones.md       ADRs 001-024: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+  decisiones.md       ADRs 001-028: name, scope, well key, units, raw-data policy, stack, capiv, lateral
                       precedence, master universe, alias policy, placeholder dates, publication format,
                       indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window,
-                      site stack, site data (JSON vs Parquet in the browser), what the site cuts, publish cadence
+                      site stack, site data (JSON vs Parquet in the browser), what the site cuts, publish cadence,
+                      F4 local agent + MCP without free SQL, Parquet/JSON double source, citation validator, model + mock
   maestro.md          every column of the master with its rule, and every flag
   indicadores.md      every column of indicadores and curvas_tipo: formula, units, rule, flags
+  agente.md           F4: the tools, the envelope, the validator, providers, MCP config · ejemplos-agente.md  transcripts
   esquemas/           one markdown per dataset with its real columns
   calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report · sitio-*.png  screenshots of the site
 informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), indicadores-<date>.md (F2), diff-<a>-<b>.md
 alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (appended by the build); borradores/
 data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.* (git-ignored, rebuild or take the release)
-tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract
+tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract, F4 tools on Parquet and JSON + validator + mock agent
 ```
 
 ## Rules this repository follows
@@ -182,6 +230,7 @@ tests/                pytest, tiny CSV fixtures (master, diff), fake network, si
 - **Lineage is part of the data**: every quality rule is a SQL predicate printed in the report; every future
   indicator will carry the columns and rule it came from.
 - **Outliers are flagged, never deleted. Missing data is "no data, because…", never zero.**
+- **No number without a citation**: the site prints `tabla.columna` next to every value; the agent cites the tool, table, columns and filters behind every number, and a validator checks it.
 
 ## Related
 

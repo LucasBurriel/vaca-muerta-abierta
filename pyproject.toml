@@ -26,6 +26,7 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+agente = ["anthropic>=0.75", "mcp>=1.2"]  # F4: the Claude provider and the MCP server; tools and tests need neither
 
 [project.urls]
 Homepage = "https://github.com/LucasBurriel/vaca-muerta-abierta"

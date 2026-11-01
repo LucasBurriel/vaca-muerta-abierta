@@ -371,3 +371,79 @@ snapshot** when the pipeline fails and says so in the run summary, so the site i
 the portal answers from GitHub's network, a refresh is `python pipeline.py download master indicadores curvas site`
 on a machine that reaches the portal, then a commit of `site/data/` (which triggers nothing; run `publish` by hand), or
 a self-hosted runner. This is a limitation of the source's network policy, not of the pipeline.
+
+## ADR-025 · F4 runs locally: CLI + MCP stdio, typed read-only tools, no free SQL by default (2026-11-01)
+
+**Context.** The brief's F4 is "questions in natural language with the query and the source cited". The site is static
+on GitHub Pages (ADR-021) with no backend to host a model behind, and the author's pattern for putting an agent on
+organisational data is a read-only MCP server per source with bounded, typed tools, never the model on the database.
+
+**Decision.** F4 is a local CLI (`agente.py`) and an MCP server over stdio (`mcp_server.py`) over one tool registry
+(`vma/consulta/herramientas.py`): `metadatos`, `describir_tabla`, `buscar_pozo`, `ficha_pozo`, `comparar_grupo`,
+`ranking`, `curva_tipo`. Each tool builds its own parametrised DuckDB query from allowlists (tables, metrics,
+dimensions, filters), applies the published rules (in scope only, `n_min = 5`, outliers in unless excluded) and
+returns `{datos, cita: {tabla, columnas, filtros, regla_doc}, exclusiones, notas, fecha_datos, version_maestro, fuente}`.
+The model never writes SQL unless the user starts the agent with `--sql`, which adds `sql_solo_lectura`: SELECT/WITH
+only, only the three published tables, no file/system functions, no `;`, LIMIT 200 forced, 10 s timeout, the query
+quoted as the citation. No hosting, no site chat: the site stays static.
+
+**Consequences.** Anyone can run the agent on a clone with their own key; nothing runs on the author's account. The
+answer space is bounded by seven tools, which is the point: a question the tools cannot answer gets "no se puede con
+las herramientas" rather than an improvised query. The cost is that new kinds of questions need a new tool, with its
+test and its row in `docs/agente.md`. The SQL risk is documented rather than denied: a `SELECT` that forgets
+`en_alcance` or `rama_normalizable` looks right and is wrong, which is why it is opt-in and the tools exist.
+
+## ADR-026 · Two data sources, one set of views: Parquet if built, else the committed JSON snapshot (2026-11-01)
+
+**Context.** The published tables are Parquet in `data/publicado/<date>/` and are not committed (ADR-014); building
+them means a ≈ 460 MB download that the portal does not even serve to GitHub runners (ADR-024). The site's snapshot in
+`site/data/` is committed and small (ADR-022) but carries a subset of columns, 4 significant digits and curves to
+month 60.
+
+**Decision.** `vma/consulta/datos.py` opens either source as the same three DuckDB views (`pozos`, `indicadores`,
+`curvas_tipo`): Parquet through `read_parquet` when the folder exists, otherwise the JSON files reshaped (the columnar
+`pozos.json` split back into `indicadores` + master columns, the three `curvas_*.json` into long rows). The `Datos`
+object declares which columns the open source has; a tool asked for a missing one answers "la fuente json no trae
+…" with the list of what it does have, instead of a null that looks like data. `metadatos` and every envelope say
+which source answered.
+
+**Consequences.** A fresh clone can ask questions immediately (CI does, with the mock). The same tests run on both
+sources against the same synthetic tables, so a divergence between the site's JSON and the Parquet contract fails a
+test. The degradation is per column and explicit, in line with "lo que la fuente no tiene se dice".
+
+## ADR-027 · The citation validator: every number in an answer must exist in a tool result of the turn (2026-11-01)
+
+**Context.** A system prompt that says "cite every number" is a request, not a guarantee. The failure that matters is
+an invented, averaged or "estimated" figure stated with the same confidence as a cited one.
+
+**Decision.** `vma/consulta/validador.py` extracts the numbers the model wrote (Spanish and English formats,
+percentages, ISO dates) and checks each against the set of numbers in the turn's tool results, accepting the rounding
+the token shows (same significant digits or half a unit of its last decimal; a fraction may be quoted as a
+percentage). Free of citation: numbers in the question or in the tool arguments the model chose, integers up to 10,
+tokens glued to a word (`IP90`, `ADR-016`). On failure the loop sends one correction message naming the tokens; a second
+failure is shown with an explicit warning and exit code 2, never hidden. The validator is tested on its own (accept /
+reject / rounding / formats) and end to end with a mock provider that invents a number.
+
+**Consequences.** The check cannot tell a right citation from a wrong one, only existence; it also rejects legitimate
+arithmetic the model does itself (a difference, a share), which is intended: the tools return `n_con_dato`,
+`sin_dato_porque` and medians so the model does not have to compute, and anything else is a tool to add. It costs one
+extra model call only when it fires.
+
+## ADR-028 · Model: `claude-opus-5-5` through the Anthropic SDK with a manual tool loop; a mock provider for tests and CI (2026-11-01)
+
+**Context.** The SDK offers a tool runner that drives the loop; the loop here needs three things it does not expose:
+every tool result of the turn (for the validator), a user message injected between turns (the correction), and a
+provider that is not a model at all (CI and tests must run without a key, without network).
+
+**Decision.** `vma/consulta/agente.py` owns the loop over a one-method `Proveedor` protocol: `ProveedorAnthropic`
+calls `messages.stream(...).get_final_message()` with `claude-opus-5-5`, adaptive thinking, effort `medium` by
+default, the system prompt as a cached block, tools with `strict: true`, thinking blocks passed back unchanged;
+`ProveedorMock` plans from keywords and writes only from tool results, with a `mock-sin-cita` variant that invents a
+number. `anthropic` and `mcp` are an optional extra (`pip install -e ".[agente]"`): the tools, the validator and the
+tests import neither. The default provider is `anthropic` when `ANTHROPIC_API_KEY` is set and `mock` otherwise, said
+out loud on stderr. The `tests` workflow runs the mock agent on the committed snapshot on every push.
+
+**Consequences.** The repo never needs a key to be tested or demonstrated; `docs/ejemplos-agente.md` is honest about
+which provider produced each transcript. Swapping the model is one argument (`--modelo`), swapping the SDK's loop for
+the tool runner later would touch one class. Refusals (`stop_reason = refusal`) are reported, not retried on another
+model; the questions are about public well data and a refusal would be worth reading.

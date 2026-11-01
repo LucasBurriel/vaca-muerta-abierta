@@ -19,3 +19,6 @@ jobs:
       - run: ruff check .
       - run: ruff format --check .
       - run: python -m pytest -q
+      # F4: the agent end to end on the committed site/data/ snapshot, no model, no key (ADR-028)
+      - run: python agente.py --proveedor mock --fuente json --json "¿Qué operadora tiene la mejor mediana de IP90 por metro en Vaca Muerta, ventana de petróleo, cohorte 2024?"
+      - run: python agente.py --proveedor mock-sin-cita --fuente json --silencioso "curva tipo de Vaca Muerta 2022 en petróleo"
