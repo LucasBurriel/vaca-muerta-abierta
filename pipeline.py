@@ -8,6 +8,7 @@ python pipeline.py master                        data/publicado/<date>/pozos.{cs
 python pipeline.py diff [--a DATE --b DATE]      informes/diff-<a>-<b>.md between two downloads (default: last two)
 python pipeline.py indicadores                   data/publicado/<date>/indicadores.{csv,parquet} (per-well indicators)
 python pipeline.py curvas                        data/publicado/<date>/curvas_tipo.{csv,parquet} + informes/indicadores-<date>.md
+python pipeline.py site                          site/data/*.json for the static site (from the latest published tables)
 """
 
 from __future__ import annotations
@@ -44,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         "curvas", help="type curves by cohort (with and without outliers) + the F2 report with charts"
     )
     c.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
+    st = sub.add_parser("site", help="pre-aggregated JSON for the static site -> site/data/")
+    st.add_argument("--day", type=date.fromisoformat, default=None, help="generation date (default: today)")
     df_ = sub.add_parser("diff", help="differences between two dated downloads in data/raw/")
     df_.add_argument("--a", default=None, help="earlier download folder (YYYY-MM-DD)")
     df_.add_argument("--b", default=None, help="later download folder (YYYY-MM-DD)")
@@ -84,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "curvas":
         from vma.curvas import run
+
+        run(ROOT, today=args.day)
+        return 0
+    if args.cmd == "site":
+        from vma.site import run
 
         run(ROOT, today=args.day)
         return 0

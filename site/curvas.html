@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Curvas tipo · Vaca Muerta abierta</title>
+<link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="brand" href="index.html">Vaca Muerta abierta</a>
+  <nav>
+    <a href="index.html" data-pagina="inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas">Curvas tipo</a>
+    <a href="mapa.html" data-pagina="mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo">Método y fuentes</a>
+  </nav>
+  <span class="fecha"></span>
+</div></header>
+
+<main class="wrap">
+  <h1>Curvas tipo</h1>
+  <p class="lead">Distribución, mes a mes desde la primera producción, de la tasa de cada pozo del grupo: P50 con banda P10–P90
+  (convención petrolera: P10 es el caso alto). Tabla <code>curvas_tipo</code>; nada se publica con menos de 5 pozos (ADR-017).</p>
+  <div class="nota"><b>Las tasas son por día efectivo de producción</b> (<code>volumen / tef</code>), no por día calendario:
+  un mes con paradas da la tasa de los días que produjo. Son mayores que una tasa calendario en el factor de inactividad (ADR-016).</div>
+
+  <div class="filtros">
+    <label>Nivel <select id="f-nivel">
+      <option value="cohorte_formacion">cohorte × formación</option>
+      <option value="cohorte_formacion_ventana">cohorte × formación × ventana</option>
+      <option value="cohorte_formacion_operadora">cohorte × formación × operadora</option>
+    </select></label>
+    <label>Formación <select id="f-formacion"></select></label>
+    <label id="l-ventana" hidden>Ventana <select id="f-ventana"></select></label>
+    <label id="l-operadora" hidden>Operadora <select id="f-operadora"></select></label>
+    <label>Cohortes <select id="f-cohorte" multiple size="4"></select></label>
+    <label>Tasa <select id="f-tasa"></select></label>
+    <label class="check"><input id="f-outliers" type="checkbox"> incluir outliers (ADR-018)</label>
+    <label class="check"><input id="f-banda" type="checkbox" checked> banda P10–P90</label>
+    <label class="check"><input id="f-log" type="checkbox"> eje log</label>
+  </div>
+  <p id="resumen-filtro" class="resumen-filtro"></p>
+
+  <div id="grafico" class="grafico"></div>
+  <div id="grafico-n" class="grafico" style="height:180px;margin-top:0.5rem"></div>
+  <p class="resumen-filtro">Arriba: P50 (línea) y P10–P90 (banda) de la tasa elegida. Abajo: <code>n_pozos</code> por mes
+  (pozos con días efectivos ese mes; los que paran no cuentan). Hasta el mes 60 (ADR-023).</p>
+
+  <div class="tabla-scroll"><table class="datos" id="tabla"><thead></thead><tbody></tbody></table></div>
+
+  <footer class="pie">
+    <p>Definiciones: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a>
+    (sección <code>curvas_tipo</code>). Decisiones: ADR-015 a ADR-020, ADR-023.</p>
+    <p class="meta"></p>
+  </footer>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js" integrity="sha512-k37wQcV4v2h6jgYf5IUz1MoSKPpDs630XGSmCaCCOXxy2awgAWKHGZWr9nMyGgk3IOxA1NxdkN8r1JHgkUtMoQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script type="module" src="js/curvas.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vaca Muerta abierta</title>
+<meta name="description" content="Observatorio abierto de los datos públicos por pozo de la Secretaría de Energía (Capítulo IV): pozos, indicadores por metro de rama, curvas tipo y mapa.">
+<link rel="stylesheet" href="css/estilo.css">
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="brand" href="index.html">Vaca Muerta abierta</a>
+  <nav>
+    <a href="index.html" data-pagina="inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas">Curvas tipo</a>
+    <a href="mapa.html" data-pagina="mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo">Método y fuentes</a>
+  </nav>
+  <span class="fecha"></span>
+</div></header>
+
+<main class="wrap">
+  <h1>Los datos públicos por pozo, limpios y comparables</h1>
+  <p class="lead">La Secretaría de Energía publica, para cada pozo del país, producción mensual, fracturas, coordenadas y fechas.
+  Acá se bajan, se miden, se cruzan y se publican con el linaje a la vista. Cada número de este sitio dice de qué tabla y
+  columna sale: <span class="cita" title="así se ven las citas">tabla.columna</span>. Código y método en
+  <a href="https://github.com/LucasBurriel/vaca-muerta-abierta">GitHub</a>.</p>
+
+  <div id="tarjetas" class="tarjetas"></div>
+
+  <h2>Qué encontró cada fase</h2>
+  <div id="titulares"></div>
+
+  <h2>Vaca Muerta, ventana de petróleo: la rama se duplicó y el IP90 por metro no cayó</h2>
+  <p class="lead">Medianas por cohorte (año de primera producción) sobre los pozos en alcance con ventana <code>petroleo</code>.
+  Las tasas son por <b>día efectivo de producción</b>, no por día calendario (ADR-016). Cohortes con menos de 5 pozos con rama se muestran atenuadas.</p>
+  <div id="grafico-inicio" class="grafico" style="height:380px"></div>
+  <p id="cita-grafico" class="resumen-filtro"></p>
+
+  <footer class="pie"><p class="meta"></p></footer>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js" integrity="sha512-k37wQcV4v2h6jgYf5IUz1MoSKPpDs630XGSmCaCCOXxy2awgAWKHGZWr9nMyGgk3IOxA1NxdkN8r1JHgkUtMoQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script type="module" src="js/inicio.js"></script>
+</body>
+</html>

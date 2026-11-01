@@ -1,0 +1,432 @@
+"""Phase 3: the static site's data files.
+
+The site (``site/``) is plain HTML + ES modules with no build step; it reads **pre-aggregated JSON**
+written by ``python pipeline.py site`` into ``site/data/`` (ADR-021, ADR-022). Nothing in here is a
+new indicator: every number is copied from the published tables of the latest
+``data/publicado/<date>/`` folder, rounded for transport, and every JSON carries the name of the
+table and column it came from, so the page can print "tabla.columna" next to each value
+("sin cita no hay número").
+
+Files written:
+
+- ``meta.json``      download date, master version, last production month, manifest hashes, sizes.
+- ``resumen.json``   the headline counts of the home page, each with its table and column.
+- ``pozos.json``     one entry per master well (columnar), the explorer's and the map's table.
+- ``curvas_<nivel>.json``  type curves per level, groups with at least one publishable month, ``mes <= MES_MAX``
+  (ADR-023), P10/P50/P90 and ``n_pozos`` per month.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+import pandas as pd
+
+MES_MAX = 60  # ADR-023: the site plots five years of type curve; the tables keep every month
+SIG = 4  # significant digits kept for transport; the published Parquet keeps full precision
+COORD_DECIMALS = 5  # ~1 m
+
+# Columns copied into pozos.json, by source table (docs/indicadores.md, docs/maestro.md).
+POZOS_FROM_INDICADORES = [
+    "sigla",
+    "sigla_clave",
+    "operadora",
+    "formacion",
+    "area",
+    "cuenca",
+    "en_alcance",
+    "cohorte",
+    "ventana",
+    "rama_m",
+    "rama_normalizable",
+    "etapas",
+    "etapas_por_100m",
+    "arena_tn_por_m",
+    "agua_fractura_m3_por_m",
+    "dias_efectivos_total",
+    "ip90_petroleo_m3_d",
+    "ip90_gas_mil_m3_d",
+    "ip90_equivalente_m3_d",
+    "ip90_petroleo_m3_d_por_m",
+    "ip90_gas_mil_m3_d_por_m",
+    "ip90_equivalente_m3_d_por_m",
+    "acum12_petroleo_m3_por_m",
+    "acum12_gas_mil_m3_por_m",
+    "acum12_equivalente_m3_por_m",
+    "gor12_m3_m3",
+    "corte_agua12",
+    "outlier_ip90_m",
+    "flags",
+]
+POZOS_FROM_MAESTRO = ["longitud", "latitud", "estado", "tipo_pozo", "sub_tipo_recurso", "primera_produccion"]
+
+CURVAS_KEYS = ["cohorte", "formacion", "ventana", "operadora", "incluye_outliers"]
+CURVAS_RATES = [
+    "petroleo_m3_d",
+    "gas_mil_m3_d",
+    "equivalente_m3_d",
+    "petroleo_m3_d_por_m",
+    "gas_mil_m3_d_por_m",
+    "equivalente_m3_d_por_m",
+]
+CURVAS_STATS = ["p10", "p50", "p90"]
+CURVAS_COLUMNS = (
+    ["nivel", *CURVAS_KEYS, "mes", "n_pozos", "n_pozos_por_m", "publicable"]
+    + [f"{r}_{s}" for r in CURVAS_RATES for s in CURVAS_STATS]
+    + ["fecha_descarga", "version_maestro"]
+)
+NIVELES = ["cohorte_formacion", "cohorte_formacion_ventana", "cohorte_formacion_operadora"]
+
+
+# --- scalar helpers -------------------------------------------------------------------------------
+
+
+def sig(x, digits: int = SIG):
+    """Round to ``digits`` significant digits; None for null/NaN/inf. Ints stay ints."""
+    if x is None:
+        return None
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, int):
+        return x
+    try:
+        f = float(x)
+    except (TypeError, ValueError):
+        return x
+    if math.isnan(f) or math.isinf(f):
+        return None
+    if f == 0:
+        return 0.0
+    if float(f).is_integer() and abs(f) < 1e15:
+        return int(f)
+    return float(f"{f:.{digits}g}")
+
+
+def clean(x):
+    """A JSON-safe scalar: None for NaN/NaT, ISO for dates, Python ints/floats/bools/str otherwise."""
+    if x is None:
+        return None
+    if isinstance(x, (pd.Timestamp, datetime, date)):
+        return None if pd.isna(x) else pd.Timestamp(x).strftime("%Y-%m-%d")
+    if isinstance(x, (bool,)):
+        return x
+    if hasattr(x, "item"):  # numpy scalar
+        x = x.item()
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return None
+    if isinstance(x, str):
+        return x
+    try:
+        if pd.isna(x):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return x
+
+
+def column(series: pd.Series, *, digits: int | None = SIG) -> list:
+    out = []
+    for v in series.tolist():
+        v = clean(v)
+        if digits is not None and isinstance(v, float):
+            v = sig(v, digits)
+        out.append(v)
+    return out
+
+
+# --- pozos.json -----------------------------------------------------------------------------------
+
+
+def encode_flags(flags: pd.Series, sep: str = "|") -> tuple[list[str], list[list[int]]]:
+    """``'a|b'`` per row -> a dictionary of flag names and, per row, the indices into it."""
+    names: dict[str, int] = {}
+    rows: list[list[int]] = []
+    for f in flags.fillna("").tolist():
+        idx = []
+        for name in str(f).split(sep):
+            if not name:
+                continue
+            if name not in names:
+                names[name] = len(names)
+            idx.append(names[name])
+        rows.append(idx)
+    return list(names), rows
+
+
+def build_pozos(ind: pd.DataFrame, master: pd.DataFrame) -> dict:
+    """Columnar table for the explorer and the map: indicators + master coordinates, one entry per well."""
+    m = master.set_index("sigla_clave")[POZOS_FROM_MAESTRO]
+    t = ind[POZOS_FROM_INDICADORES].merge(m, left_on="sigla_clave", right_index=True, how="left")
+    t = t.sort_values("sigla_clave").reset_index(drop=True)
+    flag_names, flag_rows = encode_flags(t["flags"])
+    columnas: dict[str, list] = {}
+    for c in POZOS_FROM_INDICADORES:
+        if c == "flags":
+            continue
+        columnas[c] = column(t[c])
+    for c in POZOS_FROM_MAESTRO:
+        digits = COORD_DECIMALS if c in ("longitud", "latitud") else SIG
+        vals = column(t[c], digits=None)
+        if c in ("longitud", "latitud"):
+            vals = [None if v is None else round(float(v), digits) for v in vals]
+        columnas[c] = vals
+    columnas["flags"] = flag_rows
+    origen = {c: f"indicadores.{c}" for c in POZOS_FROM_INDICADORES}
+    origen.update({c: f"pozos.{c}" for c in POZOS_FROM_MAESTRO})
+    return {
+        "tabla": "indicadores + pozos (join sigla_clave)",
+        "origen": origen,
+        "n": int(len(t)),
+        "flags_dic": flag_names,
+        "columnas": columnas,
+    }
+
+
+# --- curvas_<nivel>.json ---------------------------------------------------------------------------
+
+
+def build_curvas(curvas: pd.DataFrame, nivel: str, mes_max: int = MES_MAX) -> dict:
+    """Groups of one level with at least one publishable month, months 0..mes_max, columnar per group."""
+    c = curvas[(curvas.nivel == nivel) & (curvas.mes <= mes_max)]
+    grupos = []
+    for key, g in c.groupby(CURVAS_KEYS, dropna=False, sort=True):
+        if not bool(g.publicable.any()):
+            continue
+        g = g.sort_values("mes")
+        series = {
+            r: {s: column(g[f"{r}_{s}"]) for s in CURVAS_STATS}
+            for r in CURVAS_RATES
+            if g[f"{r}_p50"].notna().any()
+        }
+        grupo = {k: clean(v) for k, v in zip(CURVAS_KEYS, key, strict=True)}
+        grupo.update(
+            {
+                "mes": column(g["mes"]),
+                "n_pozos": column(g["n_pozos"]),
+                "n_pozos_por_m": column(g["n_pozos_por_m"]),
+                "publicable": column(g["publicable"]),
+                "series": series,
+            }
+        )
+        grupos.append(grupo)
+    return {
+        "tabla": "curvas_tipo",
+        "nivel": nivel,
+        "mes_max": mes_max,
+        "estadisticos": CURVAS_STATS,
+        "tasas": CURVAS_RATES,
+        "nota": "tasas por día efectivo de producción (tef), no por día calendario (ADR-016)",
+        "n_grupos": len(grupos),
+        "grupos": grupos,
+    }
+
+
+# --- resumen.json -----------------------------------------------------------------------------------
+
+
+def _cita(valor, tabla: str, columna: str, regla: str) -> dict:
+    return {
+        "valor": sig(valor) if not isinstance(valor, str) else valor,
+        "tabla": tabla,
+        "columna": columna,
+        "regla": regla,
+    }
+
+
+def build_resumen(ind: pd.DataFrame, master: pd.DataFrame, curvas: pd.DataFrame) -> dict:
+    """Headline counts for the home page. Every entry says which table, column and rule produced it."""
+    scope = ind[ind.en_alcance.eq(True)]
+    prod = scope[scope.cohorte.notna()]
+    con_rama = scope[scope.rama_normalizable.eq(True)]
+    con_ip90m = prod[prod.ip90_equivalente_m3_d_por_m.notna()]
+    screened = scope[scope.outlier_ip90_m.notna()]
+    out = screened[screened.outlier_ip90_m.eq(True)]
+    ult = master.ultima_produccion.max() if "ultima_produccion" in master else None
+    pub = curvas[curvas.publicable.eq(True) & (curvas.mes == 0) & curvas.incluye_outliers.eq(True)]
+    por_nivel = pub.groupby("nivel").size().to_dict() if len(pub) else {}
+    r = {
+        "pozos_maestro": _cita(
+            len(master), "pozos", "sigla_clave", "una fila por pozo físico (ADR-003, ADR-011)"
+        ),
+        "pozos_en_alcance": _cita(
+            len(scope),
+            "indicadores",
+            "en_alcance",
+            "cuenca = NEUQUINA y tipo_recurso = NO CONVENCIONAL (ADR-002)",
+        ),
+        "pozos_productores": _cita(
+            len(prod), "indicadores", "cohorte", "en alcance con primera_produccion (ADR-013)"
+        ),
+        "pozos_con_rama": _cita(
+            len(con_rama),
+            "indicadores",
+            "rama_normalizable",
+            "en alcance, rama_m conocida y >= 500 m (ADR-019)",
+        ),
+        "pozos_con_ip90_por_m": _cita(
+            len(con_ip90m), "indicadores", "ip90_equivalente_m3_d_por_m", "no nulo (ADR-016, ADR-019)"
+        ),
+        "pozos_evaluados_outlier": _cita(len(screened), "indicadores", "outlier_ip90_m", "no nulo (ADR-018)"),
+        "outliers": _cita(len(out), "indicadores", "outlier_ip90_m", "= True (ADR-018)"),
+        "operadoras": _cita(
+            int(scope.operadora.nunique()),
+            "indicadores",
+            "operadora",
+            "distintas, en alcance (alias/operadoras.csv, ADR-012)",
+        ),
+        "formaciones": _cita(
+            int(scope.formacion.nunique()), "indicadores", "formacion", "distintas, en alcance"
+        ),
+        "cohorte_min": _cita(
+            int(prod.cohorte.min()) if len(prod) else None, "indicadores", "cohorte", "mínimo"
+        ),
+        "cohorte_max": _cita(
+            int(prod.cohorte.max()) if len(prod) else None, "indicadores", "cohorte", "máximo"
+        ),
+        "ultima_produccion": _cita(clean(ult), "pozos", "ultima_produccion", "máximo"),
+        "grupos_curvas_publicables": {
+            nivel: _cita(
+                int(por_nivel.get(nivel, 0)),
+                "curvas_tipo",
+                "publicable",
+                "mes 0, incluye_outliers, n_pozos >= 5 (ADR-017)",
+            )
+            for nivel in NIVELES
+        },
+        "ventanas": {
+            str(k): _cita(int(v), "indicadores", "ventana", "en alcance con producción (ADR-020)")
+            for k, v in prod.ventana.fillna("sin_gor").value_counts().items()
+        },
+    }
+    # Vaca Muerta by cohort, oil window: median lateral and median IP90 oil per metre (the F2 headline).
+    vm = prod[(prod.formacion == "Vaca Muerta") & (prod.ventana == "petroleo")]
+    filas = []
+    for coh, g in vm.groupby("cohorte"):
+        filas.append(
+            {
+                "cohorte": int(coh),
+                "n": int(len(g)),
+                "rama_m_mediana": sig(g.rama_m.median()),
+                "ip90_petroleo_m3_d_por_m_mediana": sig(g.ip90_petroleo_m3_d_por_m.median()),
+                "n_con_ip90_por_m": int(g.ip90_petroleo_m3_d_por_m.notna().sum()),
+            }
+        )
+    r["vaca_muerta_petroleo_por_cohorte"] = {
+        "tabla": "indicadores",
+        "origen_columnas": ["cohorte", "rama_m", "ip90_petroleo_m3_d_por_m"],
+        "regla": "en alcance, formacion = Vaca Muerta, ventana = petroleo; medianas por cohorte",
+        "filas": filas,
+    }
+    return r
+
+
+# --- meta.json + writer -------------------------------------------------------------------------------
+
+
+def build_meta(
+    manifest: dict,
+    version_maestro: str,
+    fecha_descarga: str | None,
+    tablas: dict[str, tuple[int, int]],
+    archivos: dict[str, int],
+    today: date,
+) -> dict:
+    fuentes = [
+        {k: s.get(k) for k in ("key", "file", "bytes", "sha256", "ckan_last_modified", "url", "license")}
+        for s in manifest.get("sources", [])
+    ]
+    return {
+        "fecha_generacion": today.isoformat(),
+        "generado_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "fecha_descarga": fecha_descarga,
+        "version_maestro": version_maestro,
+        "manifest_generated_at": manifest.get("generated_at"),
+        "fuentes": fuentes,
+        "tablas": {k: {"filas": n, "columnas": c} for k, (n, c) in tablas.items()},
+        "archivos": archivos,
+        "mes_max_curvas": MES_MAX,
+        "licencia_datos": "CC-BY 4.0, Secretaría de Energía de la Nación Argentina",
+        "licencia_codigo": "MIT",
+    }
+
+
+def _dump(path: Path, obj) -> int:
+    text = json.dumps(obj, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+    path.write_text(text, encoding="utf-8")
+    return len(text.encode("utf-8"))
+
+
+def build_site_data(
+    out_dir: Path,
+    master: pd.DataFrame,
+    ind: pd.DataFrame,
+    curvas: pd.DataFrame,
+    manifest: dict,
+    version_maestro: str,
+    today: date | None = None,
+    mes_max: int = MES_MAX,
+) -> dict:
+    """Write every JSON the site needs into ``out_dir`` and return the meta dict."""
+    today = today or date.today()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    archivos: dict[str, int] = {}
+    archivos["pozos.json"] = _dump(out_dir / "pozos.json", build_pozos(ind, master))
+    for nivel in NIVELES:
+        archivos[f"curvas_{nivel}.json"] = _dump(
+            out_dir / f"curvas_{nivel}.json", build_curvas(curvas, nivel, mes_max)
+        )
+    archivos["resumen.json"] = _dump(out_dir / "resumen.json", build_resumen(ind, master, curvas))
+    fecha_descarga = clean(ind.fecha_descarga.iloc[0]) if len(ind) and "fecha_descarga" in ind else None
+    tablas = {
+        "pozos": (len(master), len(master.columns)),
+        "indicadores": (len(ind), len(ind.columns)),
+        "curvas_tipo": (len(curvas), len(curvas.columns)),
+    }
+    meta = build_meta(manifest, version_maestro, fecha_descarga, tablas, archivos, today)
+    archivos["meta.json"] = _dump(out_dir / "meta.json", meta)
+    meta["archivos"] = archivos
+    _dump(out_dir / "meta.json", meta)
+    return meta
+
+
+def run(root: Path, today: date | None = None) -> Path:
+    """``python pipeline.py site``: read the latest published tables and the raw manifest, write site/data/."""
+    from .indicadores import latest_published_dir, latest_raw_dir
+
+    pub = latest_published_dir(root)
+    for name in ("indicadores.parquet", "curvas_tipo.parquet"):
+        if not (pub / name).exists():
+            raise SystemExit(f"{pub / name} missing: run `python pipeline.py indicadores` and `curvas`")
+    master = pd.read_parquet(pub / "pozos.parquet")
+    ind = pd.read_parquet(pub / "indicadores.parquet")
+    curvas = pd.read_parquet(pub / "curvas_tipo.parquet")
+    manifest_path = latest_raw_dir(root) / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    out_dir = root / "site" / "data"
+    meta = build_site_data(out_dir, master, ind, curvas, manifest, pub.name, today)
+    total = sum(meta["archivos"].values())
+    print(f"site data -> {out_dir}  ({total / 1e6:.2f} MB in {len(meta['archivos'])} files)")
+    for k, v in meta["archivos"].items():
+        print(f"  {k:40} {v / 1e6:6.2f} MB")
+    return out_dir
+
+
+__all__ = [
+    "CURVAS_COLUMNS",
+    "CURVAS_RATES",
+    "MES_MAX",
+    "NIVELES",
+    "POZOS_FROM_INDICADORES",
+    "POZOS_FROM_MAESTRO",
+    "build_curvas",
+    "build_meta",
+    "build_pozos",
+    "build_resumen",
+    "build_site_data",
+    "encode_flags",
+    "run",
+    "sig",
+]

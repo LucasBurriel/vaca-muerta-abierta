@@ -1,0 +1,63 @@
+name: publish
+
+# Rebuilds the published tables from a fresh download and deploys the static site to GitHub Pages.
+# Monthly (the source lags one to three months and is revised backwards, ADR-005) and on demand.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 5 * *"  # day 5 of every month, 09:00 UTC (ADR-024)
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+      - name: download (~460 MB, dated, hashed)
+        run: python pipeline.py download
+      - name: master
+        run: python pipeline.py master
+      - name: indicadores
+        run: python pipeline.py indicadores
+      - name: curvas
+        run: python pipeline.py curvas
+      - name: site data
+        run: python pipeline.py site
+      - name: size of what the browser loads
+        run: du -ah site/data && du -sh site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - name: keep the published tables and reports as a run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: publicado-${{ github.run_id }}
+          path: |
+            data/publicado/
+            informes/
+            docs/*.png
+          retention-days: 90
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -17,8 +17,22 @@ This repository builds an **open observatory** on top of it, in phases that each
 | **F0 · Measure the dirt** | dated, hashed download of every dataset; real schema of each file; a data-quality report with numbers and charts; alias drafts; decisions | **done** → [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md) |
 | **F1 · Well master** | one row per physical well, every spelling of its sigla as alias, operator and formation normalised with versioned alias tables, coordinates validated, lateral length with explicit precedence, first production computed; published as CSV + Parquet with per-row lineage and flags | **done** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
 | **F2 · Indicators** | one row per well: IP30/90/180 in producing days, cumulatives at 6/12/24 months, everything per metre of lateral, GOR, water cut, fluid window, flags and lineage; type curves P10/P50/P90 by cohort × formation (× window, × operator) with `n_pozos`, published with and without outliers | **done** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
-| F3 · Site | interactive explorer + map, rebuilt monthly by CI | next |
-| F4 · Questions in natural language | an agent with read-only tools over the published tables; no number without its query | later |
+| **F3 · Site** | static explorer: wells table with "no data because…" cells, type curves P10/P50/P90 with `n`, Leaflet map, method page; pre-aggregated JSON from the pipeline, rebuilt monthly by CI and deployed to GitHub Pages | **done** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
+| F4 · Questions in natural language | an agent with read-only tools over the published tables; no number without its query | next |
+
+## The site (F3, 2026-10-31)
+
+**[lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/)** — static,
+no build step, no backend: HTML + ES modules reading pre-aggregated JSON that `python pipeline.py site` writes from
+the published tables (ADR-021, ADR-022). Every number on screen carries a `tabla.columna` chip; every empty cell
+says why it is empty (the row's `flags`); every rate says it is per producing day. Rebuilt on the 5th of each month
+by [`publish.yml`](.github/workflows/publish.yml) (ADR-024). Pages: home with the F0-F2 headlines, well explorer
+(filters, sort, CSV download), type curves (level, formation, window/operator, cohorts, outlier toggle, log axis),
+map (colour by IP90 per metre or by category, popup with the reason for each missing value), method and sources
+(manifest hashes, tables, rules, licences).
+
+![site: type curves](docs/sitio-curvas.png)
+![site: map](docs/sitio-mapa.png)
 
 ## What F2 found (2026-10-31)
 
@@ -101,7 +115,7 @@ Full report: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md).
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 83 tests, no network, no data needed
+python -m pytest -q            # 94 tests, no network, no data needed
 
 python pipeline.py sources     # the catalogue (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<today>/ + manifest.json (URL, bytes, sha256, CKAN last_modified)
@@ -111,15 +125,20 @@ python pipeline.py master      # data/publicado/<today>/pozos.{csv,parquet} + in
 python pipeline.py diff        # informes/diff-<a>-<b>.md between the last two downloads (or --a/--b)
 python pipeline.py indicadores # data/publicado/<today>/indicadores.{csv,parquet}  (~10 s)
 python pipeline.py curvas      # data/publicado/<today>/curvas_tipo.{csv,parquet} + informes/indicadores-<today>.md + docs/indicadores-*.png
+python pipeline.py site        # site/data/*.json (+ meta.json) for the static site, from the latest published tables
+cd site && python -m http.server 8000   # open http://localhost:8000
 ```
 
 Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib`. Raw data is never committed; the manifest is what
-makes two downloads comparable.
+makes two downloads comparable. The site needs no Node and no server beyond a static file server.
+
+GitHub Pages for a fork: enable it once with build type *GitHub Actions* (Settings → Pages, or
+`gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow`), then run the `publish` workflow.
 
 ## Layout
 
 ```
-pipeline.py           sources | download | schema | quality | master | diff | indicadores | curvas
+pipeline.py           sources | download | schema | quality | master | diff | indicadores | curvas | site
 vma/
   sources.py          catalogue of CKAN datasets/resources (ids, URLs, sizes, default vs opt-in)
   download.py         dated download with manifest; network isolated behind an injectable opener
@@ -133,19 +152,23 @@ vma/
   indicadores.py      F2: monthly production per well, IP in producing days, cumulatives, per metre, GOR, window, outliers
   curvas.py           F2: type curves P10/P50/P90/mean by cohort × formation (× window, × operator), min 5 wells
   informe_indicadores.py  the F2 report and its four charts
+  site.py             F3: pre-aggregated JSON for the site (pozos, curvas per level, resumen, meta with manifest hashes)
+site/                 the static site: index · explorador · curvas · mapa · metodo (.html), js/, css/, data/ (generated, committed)
+.github/workflows/    tests.yml (every push, no data) · publish.yml (monthly + manual: download → tables → site → GitHub Pages)
 docs/
   fuentes.md          every dataset: URL, licence, grain, size, last data, units as published
-  decisiones.md       ADRs 001-020: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+  decisiones.md       ADRs 001-024: name, scope, well key, units, raw-data policy, stack, capiv, lateral
                       precedence, master universe, alias policy, placeholder dates, publication format,
-                      indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window
+                      indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window,
+                      site stack, site data (JSON vs Parquet in the browser), what the site cuts, publish cadence
   maestro.md          every column of the master with its rule, and every flag
   indicadores.md      every column of indicadores and curvas_tipo: formula, units, rule, flags
   esquemas/           one markdown per dataset with its real columns
-  calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report
+  calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report · sitio-*.png  screenshots of the site
 informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), indicadores-<date>.md (F2), diff-<a>-<b>.md
 alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (appended by the build); borradores/
 data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.* (git-ignored, rebuild or take the release)
-tests/                pytest, tiny CSV fixtures (master, diff), fake network
+tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract
 ```
 
 ## Rules this repository follows

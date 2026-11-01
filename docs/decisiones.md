@@ -301,3 +301,66 @@ per metre in the gas window).
 **Consequences.** Comparisons stop mixing windows without needing a landing map the source does not have. A
 well's window can change between builds as its GOR history grows; that is the data revising itself, and it is
 dated by `version_maestro`.
+
+## ADR-021 · Site stack: static HTML + ES modules, ECharts and Leaflet from a CDN, no build step (2026-10-31)
+
+**Context.** The brief asks for a public explorer (filters, type curves, map, download) hosted for free and rebuilt
+monthly by CI, and prefers static "until it hurts". Observable Framework and Evidence would add a Node toolchain
+and a build to a repository that is otherwise `pip install` and `python pipeline.py`.
+
+**Decision.** `site/` is five HTML pages and a handful of ES modules served as-is (GitHub Pages, or
+`python -m http.server` locally). Charts: ECharts 5.5.0; map: Leaflet 1.9.4 with OpenStreetMap tiles; both loaded
+from cdnjs with a pinned version and an SRI hash. No framework, no bundler, no Node. The UI is in Spanish (the data's
+public, ADR-009); column names on screen are the tables' own, never translated, and every number carries a
+`tabla.columna` chip ("sin cita no hay número"). A test (`tests/test_site.py`) reads every column name the
+JavaScript uses and checks it exists in the published tables and in `docs/*.md`.
+
+**Consequences.** Anyone can open the site from a clone with one Python command; the libraries are the only
+external dependency and they are version-pinned. The price is hand-written DOM code instead of a component model;
+at five pages that is cheaper than a toolchain.
+
+## ADR-022 · Site data: pre-aggregated JSON written by the pipeline, not Parquet in the browser (2026-10-31)
+
+**Context.** The published tables are 0.7 MB (`pozos`), 1.2 MB (`indicadores`) and 5.4 MB (`curvas_tipo`,
+151 k rows) as Parquet. Reading them in the browser needs either DuckDB-WASM (tens of MB of runtime) or
+hyparquet (small, but the full `curvas_tipo` would still travel and be filtered client-side).
+
+**Decision.** `python pipeline.py site` (`vma/site.py`) copies what the pages need into `site/data/` as JSON:
+`pozos.json` (one entry per master well, columnar, flags as a dictionary + indices), one
+`curvas_<nivel>.json` per type-curve level (loaded on demand), `resumen.json` (home-page counts, each with its
+table, column and rule) and `meta.json` (download date, master version, last production month, manifest hashes,
+file sizes). Values are rounded to 4 significant digits for transport; the Parquet keeps full precision. Nothing is
+computed in the browser beyond filtering and sorting. Total 5.3 MB uncompressed; a page loads at most ~1.8 MB of
+data plus ~1 MB of ECharts. `site/data/` **is committed** (it is small, it is the dated snapshot the site shows, and
+it lets a clone open the site without the 460 MB download); CI regenerates it on every publish.
+
+**Consequences.** Adding a column to the site means adding it to a list in `vma/site.py`, where the contract test
+checks it against the tables and the docs. If the tables grow by an order of magnitude, hyparquet over the published
+Parquet is the next step, not a backend.
+
+## ADR-023 · What the site cuts: type curves to month 60, groups with at least one publishable month (2026-10-31)
+
+**Context.** `curvas_tipo` runs to month 248 for the oldest cohorts, where `n_pozos` is a handful; 2/3 of the
+groups at the operator level never reach 5 wells (ADR-017) and carry only counts.
+
+**Decision.** The site ships months 0-60 of every group that has at least one `publicable` month; months under 5
+wells inside that range stay as `n_pozos` with null statistics (visible as "n=3" in the table). The explorer shows
+IP90 and 12-month cumulatives per metre, GOR12 and water cut 12; IP30/IP180, 6/24-month cumulatives and the raw
+(non per-metre) cumulatives are in the Parquet, not on screen. Constants: `MES_MAX` in `vma/site.py`.
+
+**Consequences.** The site is a view, the tables are the product. Anyone needing month 61+ or IP180 takes the
+release or runs the pipeline.
+
+## ADR-024 · Publish cadence: monthly on day 5, 09:00 UTC, plus manual; Pages built by the workflow (2026-10-31)
+
+**Context.** The source lags one to three months and is revised backwards (ADR-005); the production file's last
+month appears early in the following month. Tests must keep running on every push without data.
+
+**Decision.** `.github/workflows/publish.yml` runs on `workflow_dispatch` and on `schedule` (`0 9 5 * *`):
+`download` → `master` → `indicadores` → `curvas` → `site`, then `upload-pages-artifact` + `deploy-pages`
+(GitHub Pages with `build_type = workflow`). The published tables, reports and charts of that run are kept as a
+run artifact for 90 days; nothing is committed back by CI (the repo stays the recipe, ADR-014). The `tests` workflow
+stays separate and data-free.
+
+**Consequences.** The site's "datos descargados el" date moves once a month without anyone touching the repo. A
+failed download leaves the previous deployment in place.

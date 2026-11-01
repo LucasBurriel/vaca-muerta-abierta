@@ -17,8 +17,19 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 | **F0 · Medir la suciedad** | descarga fechada y con hash de cada dataset; esquema real de cada archivo; informe de calidad con números y gráficos; borradores de alias; decisiones | **hecha** → [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md) |
 | **F1 · Maestro de pozos** | una fila por pozo físico, todas las grafías de su sigla como alias, operadora y formación normalizadas con tablas versionadas, coordenadas validadas, rama con precedencia explícita, primera producción calculada; publicado como CSV + Parquet con linaje y flags por fila | **hecha** → [`informes/maestro-2026-10-31.md`](informes/maestro-2026-10-31.md) |
 | **F2 · Indicadores** | una fila por pozo: IP30/90/180 en días efectivos, acumulados a 6/12/24 meses, todo por metro de rama, GOR, corte de agua, ventana de fluido, flags y linaje; curvas tipo P10/P50/P90 por cohorte × formación (× ventana, × operadora) con `n_pozos`, publicadas con y sin outliers | **hecha** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
-| F3 · Sitio | explorador interactivo + mapa, regenerado cada mes por CI | siguiente |
-| F4 · Preguntas en lenguaje natural | un agente con herramientas de solo lectura sobre las tablas publicadas; ningún número sin su consulta | después |
+| **F3 · Sitio** | explorador estático: tabla de pozos con celdas "sin dato porque…", curvas tipo P10/P50/P90 con `n`, mapa Leaflet, página de método; JSON pre-agregados por el pipeline, regenerado cada mes por CI y publicado en GitHub Pages | **hecha** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
+| F4 · Preguntas en lenguaje natural | un agente con herramientas de solo lectura sobre las tablas publicadas; ningún número sin su consulta | siguiente |
+
+## El sitio (F3, 31-10-2026)
+
+**[lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/)**: estático, sin
+build ni backend; HTML + módulos ES que leen JSON pre-agregados que `python pipeline.py site` escribe desde las tablas
+publicadas (ADR-021, ADR-022). Cada número lleva su `tabla.columna`; cada celda vacía dice por qué (los `flags` de la
+fila); cada tasa aclara que es por día efectivo. Se regenera el 5 de cada mes (ADR-024). Páginas: inicio, explorador
+de pozos (filtros, orden, descarga CSV), curvas tipo (nivel, formación, ventana/operadora, cohortes, outliers, eje
+log), mapa (color por IP90/m o por categoría), método y fuentes (hashes del manifiesto, tablas, reglas, licencias).
+
+![sitio: curvas tipo](docs/sitio-curvas.png)
 
 ## Qué encontró F2 (31-10-2026)
 
@@ -93,7 +104,7 @@ Informe completo: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 83 tests, sin red, sin datos
+python -m pytest -q            # 94 tests, sin red, sin datos
 
 python pipeline.py sources     # el catálogo (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<hoy>/ + manifest.json (URL, bytes, sha256, last_modified de CKAN)
@@ -103,6 +114,8 @@ python pipeline.py master      # data/publicado/<hoy>/pozos.{csv,parquet} + info
 python pipeline.py diff        # informes/diff-<a>-<b>.md entre las dos últimas descargas (o --a/--b)
 python pipeline.py indicadores # data/publicado/<hoy>/indicadores.{csv,parquet}  (~10 s)
 python pipeline.py curvas      # data/publicado/<hoy>/curvas_tipo.{csv,parquet} + informes/indicadores-<hoy>.md + docs/indicadores-*.png
+python pipeline.py site        # site/data/*.json (+ meta.json) para el sitio estático
+cd site && python -m http.server 8000   # abrir http://localhost:8000
 ```
 
 Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib`. Los datos crudos nunca se versionan; el manifiesto
@@ -120,7 +133,8 @@ es lo que hace comparables dos descargas.
 
 Las decisiones (nombre, alcance, clave de pozo, unidades, relación con `capiv`, precedencia de la rama, política de
 alias, fechas de relleno, formato de publicación, grano de los indicadores, tasas por día efectivo, mínimo de pozos,
-regla de outliers, umbral de rama, ventana de fluido) están en [docs/decisiones.md](docs/decisiones.md).
+regla de outliers, umbral de rama, ventana de fluido, stack del sitio, JSON vs Parquet en el navegador, recortes del
+sitio, cadencia mensual) están en [docs/decisiones.md](docs/decisiones.md).
 
 ## Licencia
 
