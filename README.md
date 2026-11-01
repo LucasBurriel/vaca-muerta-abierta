@@ -133,7 +133,9 @@ Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib`. Raw data is never 
 makes two downloads comparable. The site needs no Node and no server beyond a static file server.
 
 GitHub Pages for a fork: enable it once with build type *GitHub Actions* (Settings → Pages, or
-`gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow`), then run the `publish` workflow.
+`gh api -X POST repos/<owner>/<repo>/pages -f build_type=workflow`), then run the `publish` workflow. Note: on 2026-11-01 the portal did not answer GitHub-hosted runners at all; the
+workflow then deploys the committed `site/data/` snapshot and flags it in the run summary (ADR-024). To refresh the data,
+run the pipeline where the portal is reachable and commit `site/data/`.
 
 ## Layout
 

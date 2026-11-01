@@ -364,3 +364,10 @@ stays separate and data-free.
 
 **Consequences.** The site's "datos descargados el" date moves once a month without anyone touching the repo. A
 failed download leaves the previous deployment in place.
+
+*Observed on the first runs (2026-11-01):* `datos.energia.gob.ar` did not accept TCP connections from GitHub-hosted
+runners (HEAD and GET both timed out, three attempts). The workflow therefore deploys the **committed `site/data/`
+snapshot** when the pipeline fails and says so in the run summary, so the site is always up with dated data. Until
+the portal answers from GitHub's network, a refresh is `python pipeline.py download master indicadores curvas site`
+on a machine that reaches the portal, then a commit of `site/data/` (which triggers nothing; run `publish` by hand), or
+a self-hosted runner. This is a limitation of the source's network policy, not of the pipeline.
