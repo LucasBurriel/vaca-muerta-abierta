@@ -6,16 +6,24 @@ import pytest
 from conftest import fake_opener_factory
 
 from vma import download as dl
-from vma.sources import SOURCES, default_keys
+from vma.sources import FAMILIES, SOURCES, default_keys, opt_in_keys
 
 
 def test_sources_catalogue_is_consistent():
     for s in SOURCES.values():
-        assert s.url.startswith("https://datos.energia.gob.ar/dataset/")
+        if s.url_fija:
+            assert s.url.startswith("http://www.energia.gob.ar/") and s.formato == "zip-xlsx"
+        else:
+            assert s.url.startswith("https://datos.energia.gob.ar/dataset/")
         assert s.url.endswith(s.filename)
-        assert s.family in {"produccion", "pozos", "fractura", "perforacion"}
+        assert s.family in FAMILIES
+        assert s.archivo_local.endswith(".zip" if s.formato == "zip-xlsx" else f".{s.formato}")
     assert "produccion_nc" in default_keys()
     assert "metros_perforados" not in default_keys()  # opt-in
+    # the F5 catalogue (ADR-029) is opt-in: the default download stays the per-well Capítulo IV set
+    nuevos = {"reservas", "precios_gas", "regalias_crudo", "produccion_yacimiento_formacion", "concesiones"}
+    assert nuevos <= set(opt_in_keys())
+    assert all(SOURCES[k].grano for k in nuevos)
 
 
 def test_download_writes_files_and_manifest(tmp_path, fixtures_dir):

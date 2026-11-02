@@ -447,3 +447,29 @@ out loud on stderr. The `tests` workflow runs the mock agent on the committed sn
 which provider produced each transcript. Swapping the model is one argument (`--modelo`), swapping the SDK's loop for
 the tool runner later would touch one class. Refusals (`stop_reason = refusal`) are reported, not retried on another
 model; the questions are about public well data and a refusal would be worth reading.
+
+## ADR-029 · The extended catalogue: documented whole, catalogued as opt-in by one criterion, parsed only when a tool needs it (2026-11-02)
+
+**Context.** The portal publishes 178 datasets, 40 of them upstream; the observatory used 9. F5 turns the agent
+towards people in operating companies who compare their own wells with the Capítulo IV, and the obvious questions
+after "how does my well compare" are "what is that worth" (prices, reserves) and "what does the rest of the field
+do" (production by field). Downloading everything is neither reproducible (several files are 200-770 MB, two are
+XLSX inside ZIP hosted outside CKAN) nor honest: a dataset nobody reads is a maintenance cost.
+
+**Decision.** Three tiers, all written down in `docs/fuentes.md` ("Catálogo ampliado") with id, grain, period,
+size, licence and one line of use. (1) **Catalogued, opt-in** in `vma/sources.py` when a dataset feeds a planned
+comparison and is small or indispensable: `reservas` (field-level P1/P2/P3, to confront an EUR with what is
+booked), `precios_gas` and `regalias_crudo` (the realised prices that turn m³ into USD), `produccion_yacimiento_formacion`
+(the field × formation context of a well, conventional included), `concesiones` (attributes of the polygon a user's
+wells sit in). `Source` gains `formato`, `url_fija` and `grano`; `download` keeps the real extension and records the
+format in the manifest, nothing else changes. (2) **Later**: documented with the module that would use them
+(forecasts declared by operators, capex by concession, gas balance, map layers, the "con identificador" yearly
+production files). (3) **No**: downstream, metering, environmental filings, stale price files, with the reason.
+No loader is written for a source until a tool consumes it: F5 catalogues and downloads the five, and documents
+the XLSX layouts, but the F5 tools work on the three published tables plus the user's own data.
+
+**Consequences.** The default download is unchanged, so CI, the site and the agent behave as before. Someone who
+wants to value a curve downloads two files of 1.5 MB in total and reads one documented layout. The catalogue is a
+dated reading of the portal, not a promise: resource ids and file names are pinned and the download warns when
+CKAN moves them (ADR-005). The per-well reserves, costs and pressures an engineer would want do not exist on the
+portal, and the document says so rather than leaving the gap implicit.

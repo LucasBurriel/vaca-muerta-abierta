@@ -89,7 +89,7 @@ def ckan_resource_meta(resource_id: str, opener: Opener = open_url) -> dict[str,
 def download_one(
     src: Source, dst_dir: Path, opener: Opener = open_url, log: Callable[[str], None] = print
 ) -> dict[str, Any]:
-    dst = dst_dir / f"{src.key}.csv"
+    dst = dst_dir / src.archivo_local
     meta = ckan_resource_meta(src.resource_id, opener)
     if meta and meta.get("url") and meta["url"].rsplit("/", 1)[-1] != src.filename:
         moved = meta["url"].rsplit("/", 1)[-1]
@@ -112,6 +112,7 @@ def download_one(
         "ckan_last_modified": (meta or {}).get("last_modified"),
         "ckan_size": (meta or {}).get("size"),
         "license": "CC-BY-4.0",
+        "formato": src.formato,
     }
 
 
@@ -153,7 +154,7 @@ def download(
     entries = []
     for k in keys:
         src = SOURCES[k]
-        if (dst_dir / f"{k}.csv").exists() and not force:
+        if (dst_dir / src.archivo_local).exists() and not force:
             log(f"  {k}: already present, skipping (use --force to re-download)")
             continue
         entries.append(download_one(src, dst_dir, opener, log))

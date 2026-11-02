@@ -57,7 +57,8 @@ def main(argv: list[str] | None = None) -> int:
 
         for s in SOURCES.values():
             flag = "" if s.default else "  (opt-in)"
-            print(f"{s.key:26} {s.family:12} ~{s.approx_mb:>6} MB  {s.title}{flag}")
+            fmt = "" if s.formato == "csv" else f" [{s.formato}]"
+            print(f"{s.key:32} {s.family:12} ~{s.approx_mb:>6} MB  {s.title}{flag}{fmt}")
         return 0
     if args.cmd == "download":
         from vma.download import download
