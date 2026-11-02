@@ -27,6 +27,8 @@ import pandas as pd
 
 from vma.consulta.datos import DOCS, NIVELES, TABLAS, Datos
 from vma.normalize import formation_key, operator_key, sigla_l2, sigla_l3, sigla_l4
+from vma.propios import cargar as P
+from vma.propios import comparar as K
 
 SIG = 4  # significant digits in every number returned (the site uses the same, vma/site.py)
 MAX_FILAS = 50  # rows a tool returns at most; the tool says when it cut
@@ -683,6 +685,290 @@ def curva_tipo(
     )
 
 
+# --- the user's own wells (F5, ADR-030) ----------------------------------------------------------------------------
+
+NOTA_PROPIOS = (
+    "mis datos viven sólo en la memoria de esta sesión: no se escriben a disco ni salen de la máquina (ADR-030); "
+    "las tasas propias se computan con las mismas reglas que las publicadas (docs/mis-datos.md)"
+)
+DOC_PROPIOS = "docs/mis-datos.md"
+
+
+def _redondear(obj: Any) -> Any:
+    """``_sig`` applied through nested dicts and lists."""
+    if isinstance(obj, dict):
+        return {k: _redondear(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_redondear(v) for v in obj]
+    return _sig(obj)
+
+
+def _mis(d: Datos) -> P.MisPozos:
+    if d.propios is None:
+        raise ErrorHerramienta(
+            "no hay datos propios cargados en esta sesión: llamá cargar_mis_pozos(ruta) primero "
+            "(CSV o Parquet con sigla, fecha o anio+mes, petroleo_m3, gas_mil_m3; docs/mis-datos.md)"
+        )
+    return d.propios
+
+
+def _notas_propios(mis: P.MisPozos) -> list[str]:
+    notas = [NOTA_DIAS, NOTA_PROPIOS]
+    if mis.meta.get("sintetico"):
+        notas.append(
+            "DATOS SINTÉTICOS: pozos públicos con ruido y siglas cambiadas, no son pozos reales (meta.json)"
+        )
+    notas += [f"aviso de carga: {a}" for a in mis.meta.get("avisos", [])]
+    return notas
+
+
+def cargar_mis_pozos(d: Datos, ruta: str, mapeo: dict | None = None, ruta_pozos: str | None = None) -> dict:
+    """Carga en la sesión un CSV o Parquet propio con producción mensual por pozo (sigla, fecha o anio+mes,
+    petroleo_m3, gas_mil_m3; opcionales agua_m3, tef, rama_m, etapas, arena_tn, agua_fractura_m3, formacion,
+    longitud, latitud, campania, ventana) y, si hace falta, un segundo archivo con los atributos por pozo.
+    mapeo = {columna_canonica: columna_del_archivo} cuando los nombres no coinciden con los alias. Computa los
+    indicadores con las reglas publicadas y deja las vistas mis_produccion, mis_pozos, mis_indicadores. Nada se
+    escribe a disco. Devuelve el resumen de la carga, los avisos y la lista de pozos."""
+    try:
+        mis = P.cargar(ruta, mapeo=mapeo, ruta_pozos=ruta_pozos)
+    except (FileNotFoundError, ValueError) as e:
+        raise ErrorHerramienta(str(e)) from e
+    P.registrar(d.con, mis)
+    d.propios = mis
+    ind = mis.indicadores
+    por_cohorte = ind.groupby("cohorte", dropna=True).size().to_dict() if "cohorte" in ind else {}
+    por_ventana = ind.groupby("ventana", dropna=True).size().to_dict() if "ventana" in ind else {}
+    cols = [
+        c
+        for c in (
+            "sigla",
+            "campania",
+            "formacion",
+            "cohorte",
+            "ventana",
+            "rama_m",
+            "etapas",
+            "meses_con_registro",
+            "ip90_petroleo_m3_d",
+            "ip90_petroleo_m3_d_por_m",
+            "acum12_petroleo_m3",
+            "flags",
+        )
+        if c in ind
+    ]
+    datos = {
+        "ruta": mis.meta.get("ruta"),
+        "sintetico": mis.meta.get("sintetico", False),
+        "n_pozos": mis.n_pozos,
+        "filas_pozo_mes": mis.meta.get("filas"),
+        "periodo": [mis.meta.get("mes_min"), mis.meta.get("mes_max")],
+        "mapeo_aplicado": mis.meta.get("mapeo"),
+        "formaciones": mis.meta.get("formaciones"),
+        "pozos_por_cohorte": {str(int(k)): int(v) for k, v in por_cohorte.items()},
+        "pozos_por_ventana": {str(k): int(v) for k, v in por_ventana.items()},
+        "avisos": mis.meta.get("avisos", []),
+        "pozos": [_fila(r) for r in ind[cols].head(MAX_FILAS).to_dict("records")],
+    }
+    notas = _notas_propios(mis)
+    if mis.n_pozos > MAX_FILAS:
+        notas.append(f"se listan los primeros {MAX_FILAS} de {mis.n_pozos} pozos")
+    return _envolver(
+        _redondear(datos),
+        d=d,
+        tabla="mis_produccion + mis_pozos (sesión)",
+        columnas=list(mis.meta.get("mapeo", {}).keys()),
+        filtros={"ruta": ruta, "ruta_pozos": ruta_pozos, "mapeo": mapeo},
+        regla_doc=f"{DOC_PROPIOS}; indicadores con las reglas de docs/indicadores.md (ADR-016, ADR-019, ADR-020)",
+        notas=notas,
+    )
+
+
+def comparar_mi_pozo(
+    d: Datos,
+    sigla: str,
+    tasa: str = "petroleo_m3_d",
+    cohorte_ref: int | None = None,
+    incluye_outliers: bool = True,
+    mes_max: int = 36,
+) -> dict:
+    """Mi pozo contra la curva tipo publicada de su grupo (cohorte × formación × ventana si está publicada, si no
+    cohorte × formación): mes a mes mi tasa, P10/P50/P90 del grupo, el percentil estimado (convención petrolera:
+    P10 es el caso alto) y el cociente contra P50; además mi IP90, IP90 por metro y acumulado 12 meses contra la
+    mediana del grupo público con el porcentaje de pozos que supero. tasa = petroleo_m3_d | gas_mil_m3_d |
+    equivalente_m3_d (o _por_m con rama >= 500 m). cohorte_ref permite comparar contra otra cohorte. Requiere
+    cargar_mis_pozos antes."""
+    mis = _mis(d)
+    try:
+        r = K.comparar_pozo(
+            d,
+            mis,
+            sigla,
+            tasa=tasa,
+            cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+            mes_max=int(mes_max),
+        )
+    except K.ErrorComparacion as e:
+        raise ErrorHerramienta(str(e)) from e
+    exclusiones = []
+    if not incluye_outliers:
+        exclusiones.append("pozos públicos con outlier_ip90_m = True excluidos del grupo (ADR-018)")
+    if r["meses_sin_curva"]:
+        exclusiones.append(
+            f"{r['meses_sin_curva']} mes(es) míos sin estadístico publicado (ADR-017 o fuera de la curva)"
+        )
+    notas = _notas_propios(mis) + [
+        "percentil = posición estimada entre P90, P50 y P10 publicados (interpolación log-lineal, docs/mis-datos.md); P10 es el caso alto",
+    ]
+    if r["grupo"]["cohorte"] != r["grupo"]["cohorte_del_pozo"]:
+        notas.append(
+            f"comparado contra la cohorte {r['grupo']['cohorte']} (cohorte_ref), el pozo es de {r['grupo']['cohorte_del_pozo']}"
+        )
+    if r["grupo"]["nivel"] == "cohorte_formacion" and r["grupo"].get("ventana_del_pozo"):
+        notas.append(
+            "la curva por ventana no está publicada para ese grupo: se usa cohorte × formación (mezcla ventanas)"
+        )
+    if d.fuente == "json" and mes_max > 60:
+        notas.append("fuente json: la curva llega hasta el mes 60 (ADR-023)")
+    return _envolver(
+        _redondear(r),
+        d=d,
+        tabla="mis_produccion + mis_indicadores (sesión) × curvas_tipo + indicadores",
+        columnas=["mes", "tef_d", tasa, f"{tasa}_p10", f"{tasa}_p50", f"{tasa}_p90", "ip90_*", "acum12_*"],
+        filtros={
+            "sigla": sigla,
+            "tasa": tasa,
+            "cohorte_ref": cohorte_ref,
+            "incluye_outliers": incluye_outliers,
+            "mes_max": mes_max,
+            **{
+                f"grupo_{k}": v
+                for k, v in r["grupo"].items()
+                if k in ("nivel", "cohorte", "formacion", "ventana")
+            },
+        },
+        regla_doc=f"{DOC_PROPIOS}#comparar_mi_pozo; curvas: docs/indicadores.md#curvas_tipo--columns; ADR-016, ADR-017",
+        exclusiones=exclusiones,
+        notas=notas,
+    )
+
+
+def comparar_mi_campania(
+    d: Datos,
+    filtros: dict | None = None,
+    metrica: str = "ip90_petroleo_m3_d_por_m",
+    cohorte_ref: int | None = None,
+    incluye_outliers: bool = True,
+) -> dict:
+    """Mis pozos (filtros: campania, formacion, cohorte, ventana, siglas) contra sus grupos públicos, pozo por
+    pozo: mi valor de la métrica, la mediana pública de su cohorte × formación × ventana, el cociente y el
+    porcentaje de pozos públicos que supero; y el resumen de la campaña (mediana mía, mediana de medianas públicas,
+    cuántos pozos superan la mediana pública, distribución de posiciones). Métricas: las de indicadores (ip*, acum*,
+    gor*, corte_agua*, rama_m, etapas, *_por_m). Requiere cargar_mis_pozos antes."""
+    mis = _mis(d)
+    try:
+        r = K.comparar_campania(
+            d,
+            mis,
+            filtros=filtros,
+            metrica=metrica,
+            cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+        )
+    except K.ErrorComparacion as e:
+        raise ErrorHerramienta(str(e)) from e
+    exclusiones = []
+    if not incluye_outliers:
+        exclusiones.append("pozos públicos con outlier_ip90_m = True excluidos de los grupos (ADR-018)")
+    n_sd = sum(r["sin_dato_porque"].values())
+    if n_sd:
+        exclusiones.append(f"{n_sd} pozo(s) míos sin la métrica (ver sin_dato_porque)")
+    if r["sin_grupo"]:
+        exclusiones.append(f"{len(r['sin_grupo'])} pozo(s) míos sin grupo público publicado (ver sin_grupo)")
+    notas = _notas_propios(mis)
+    if metrica.endswith("_por_m"):
+        notas.append("por metro sólo con rama_m conocida y >= 500 m (ADR-019), míos y públicos")
+    if len(r["pozos"]) > MAX_FILAS:
+        notas.append(f"se muestran {MAX_FILAS} de {len(r['pozos'])} pozos; filtrá por campaña o siglas")
+        r["pozos"] = r["pozos"][:MAX_FILAS]
+    return _envolver(
+        _redondear(r),
+        d=d,
+        tabla="mis_indicadores (sesión) × indicadores",
+        columnas=[metrica, "cohorte", "formacion", "ventana", "en_alcance", "outlier_ip90_m"],
+        filtros={
+            "filtros": filtros or {},
+            "metrica": metrica,
+            "cohorte_ref": cohorte_ref,
+            "incluye_outliers": incluye_outliers,
+        },
+        regla_doc=f"{DOC_PROPIOS}#comparar_mi_campania; docs/indicadores.md ({metrica}); ADR-017, ADR-018",
+        exclusiones=exclusiones,
+        notas=notas,
+    )
+
+
+def brechas(
+    d: Datos,
+    sigla: str | None = None,
+    filtros: dict | None = None,
+    tasa: str = "petroleo_m3_d",
+    cohorte_ref: int | None = None,
+    incluye_outliers: bool = True,
+    mes_max: int = 24,
+) -> dict:
+    """Dónde y cuánto están mis pozos por debajo del P50 de su grupo público: por mes (mi tasa, P50, brecha de
+    tasa y de volumen = brecha × días efectivos, cociente) y acumulado hasta mes_max (mi acumulado, el acumulado
+    que daría el P50 con mis días efectivos, la brecha en volumen y en %), con los tramos de meses por debajo (0-5,
+    6-11, 12+) y el peor mes. Un pozo (sigla) o varios (filtros: campania, formacion, cohorte, ventana, siglas).
+    tasa absoluta: petroleo_m3_d | gas_mil_m3_d | equivalente_m3_d. Requiere cargar_mis_pozos antes."""
+    mis = _mis(d)
+    try:
+        r = K.brechas(
+            d,
+            mis,
+            sigla=sigla,
+            filtros=filtros,
+            tasa=tasa,
+            cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+            mes_max=int(mes_max),
+        )
+    except K.ErrorComparacion as e:
+        raise ErrorHerramienta(str(e)) from e
+    exclusiones = []
+    if not incluye_outliers:
+        exclusiones.append("pozos públicos con outlier_ip90_m = True excluidos de los grupos (ADR-018)")
+    if r["sin_comparar"]:
+        exclusiones.append(f"{len(r['sin_comparar'])} pozo(s) míos sin comparar (ver sin_comparar)")
+    notas = _notas_propios(mis) + [
+        "brecha_vol = (mi tasa - P50) × mis días efectivos del mes: es lo que hubiera producido a la tasa P50 con mi calendario, no una pérdida contable",
+        "sólo meses con estadístico publicado (>= 5 pozos, ADR-017) entran en el acumulado",
+    ]
+    if len(r["pozos"]) > MAX_FILAS:
+        notas.append(
+            f"se muestran {MAX_FILAS} de {len(r['pozos'])} pozos (los de mayor brecha negativa primero)"
+        )
+        r["pozos"] = r["pozos"][:MAX_FILAS]
+    return _envolver(
+        _redondear(r),
+        d=d,
+        tabla="mis_produccion (sesión) × curvas_tipo",
+        columnas=["mes", "tef_d", tasa, f"{tasa}_p50"],
+        filtros={
+            "sigla": sigla,
+            "filtros": filtros or {},
+            "tasa": tasa,
+            "cohorte_ref": cohorte_ref,
+            "incluye_outliers": incluye_outliers,
+            "mes_max": mes_max,
+        },
+        regla_doc=f"{DOC_PROPIOS}#brechas; ADR-016, ADR-017",
+        exclusiones=exclusiones,
+        notas=notas,
+    )
+
+
 # --- opt-in: read-only SQL ------------------------------------------------------------------------------------
 
 _SQL_PROHIBIDO = re.compile(
@@ -835,6 +1121,77 @@ HERRAMIENTAS: dict[str, dict] = {
         ),
     },
 }
+_FILTROS_MIOS_SCHEMA = {
+    "type": "object",
+    "description": "filtros sobre mis pozos (todos opcionales)",
+    "properties": {
+        "campania": _STR,
+        "formacion": _STR,
+        "cohorte": _INT,
+        "ventana": {"type": "string", "enum": ["petroleo", "volatil_condensado", "gas"]},
+        "siglas": {"type": "array", "items": _STR},
+    },
+    "additionalProperties": False,
+}
+_TASAS_MIAS = [t for t in TASAS]
+HERRAMIENTAS.update(
+    {
+        "cargar_mis_pozos": {
+            "fn": cargar_mis_pozos,
+            "schema": _schema(
+                {
+                    "ruta": _STR,
+                    "mapeo": {
+                        "type": "object",
+                        "additionalProperties": _STR,
+                        "description": "{columna_canonica: columna_del_archivo}",
+                    },
+                    "ruta_pozos": _STR,
+                },
+                ["ruta"],
+            ),
+        },
+        "comparar_mi_pozo": {
+            "fn": comparar_mi_pozo,
+            "schema": _schema(
+                {
+                    "sigla": _STR,
+                    "tasa": {"type": "string", "enum": _TASAS_MIAS},
+                    "cohorte_ref": _INT,
+                    "incluye_outliers": _BOOL,
+                    "mes_max": _INT,
+                },
+                ["sigla"],
+            ),
+        },
+        "comparar_mi_campania": {
+            "fn": comparar_mi_campania,
+            "schema": _schema(
+                {
+                    "filtros": _FILTROS_MIOS_SCHEMA,
+                    "metrica": {"type": "string", "enum": sorted(METRICAS)},
+                    "cohorte_ref": _INT,
+                    "incluye_outliers": _BOOL,
+                },
+                [],
+            ),
+        },
+        "brechas": {
+            "fn": brechas,
+            "schema": _schema(
+                {
+                    "sigla": _STR,
+                    "filtros": _FILTROS_MIOS_SCHEMA,
+                    "tasa": {"type": "string", "enum": ["petroleo_m3_d", "gas_mil_m3_d", "equivalente_m3_d"]},
+                    "cohorte_ref": _INT,
+                    "incluye_outliers": _BOOL,
+                    "mes_max": _INT,
+                },
+                [],
+            ),
+        },
+    }
+)
 HERRAMIENTAS_OPT_IN: dict[str, dict] = {
     "sql_solo_lectura": {"fn": sql_solo_lectura, "schema": _schema({"sql": _STR, "limite": _INT}, ["sql"])},
 }

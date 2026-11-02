@@ -1,0 +1,34 @@
+{
+  "sintetico": true,
+  "descripcion": "pozos públicos del Capítulo IV con ruido multiplicativo y siglas cambiadas; no son pozos reales",
+  "generado": "2026-11-02",
+  "semilla": 7,
+  "n_pozos": 30,
+  "sigma_pozo": 0.15,
+  "sigma_mes": 0.08,
+  "meses_min": 12,
+  "fuente": "produccion_nc + indicadores (vma/propios/sintetico.py)",
+  "cohortes": [
+    2022,
+    2023,
+    2024
+  ],
+  "formaciones": [
+    "Vaca Muerta"
+  ],
+  "campanias": [
+    "PAD-A",
+    "PAD-B",
+    "PAD-C"
+  ],
+  "licencia_origen": "CC-BY 4.0, Secretaría de Energía de la Nación Argentina",
+  "filtro_publico": {
+    "formacion": "Vaca Muerta",
+    "cohortes": [
+      2022,
+      2024
+    ],
+    "ventana": "petroleo",
+    "sin_outliers": true
+  }
+}

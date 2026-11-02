@@ -424,12 +424,24 @@ def test_every_tool_result_carries_a_citation(d):
                 "mes_max": 2,
             },
         ),
+        # F5: the user's wells (the committed synthetic fixture, cohorts 2022-2024; the fake curves are 2024 only)
+        (
+            "cargar_mis_pozos",
+            {
+                "ruta": str(ROOT / "tests" / "fixtures" / "sintetico" / "mis_pozos_produccion.csv"),
+                "ruta_pozos": str(ROOT / "tests" / "fixtures" / "sintetico" / "mis_pozos_atributos.csv"),
+            },
+        ),
+        ("comparar_mi_pozo", {"sigla": "MIO-003", "mes_max": 3}),
+        ("comparar_mi_campania", {"filtros": {"cohorte": 2024}, "metrica": "ip90_petroleo_m3_d"}),
+        ("brechas", {"filtros": {"cohorte": 2024}, "mes_max": 3}),
     ]
     assert {n for n, _ in llamadas} == set(H.HERRAMIENTAS)
     for nombre, entrada in llamadas:
         r = H.ejecutar(d, nombre, entrada)
         _cita_ok(r)
         assert r["fuente"] == d.fuente
+    d.propios = None
     with pytest.raises(H.ErrorHerramienta):
         H.ejecutar(d, "sql_solo_lectura", {"sql": "select 1"})  # not exposed without con_sql
     with pytest.raises(H.ErrorHerramienta):

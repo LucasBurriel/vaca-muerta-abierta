@@ -9,6 +9,7 @@ python pipeline.py diff [--a DATE --b DATE]      informes/diff-<a>-<b>.md betwee
 python pipeline.py indicadores                   data/publicado/<date>/indicadores.{csv,parquet} (per-well indicators)
 python pipeline.py curvas                        data/publicado/<date>/curvas_tipo.{csv,parquet} + informes/indicadores-<date>.md
 python pipeline.py site                          site/data/*.json for the static site (from the latest published tables)
+python pipeline.py sintetico [--n 30] [--semilla 7] [--salida DIR]   synthetic "my wells" dataset from public wells + noise (F5)
 """
 
 from __future__ import annotations
@@ -47,6 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
     st = sub.add_parser("site", help="pre-aggregated JSON for the static site -> site/data/")
     st.add_argument("--day", type=date.fromisoformat, default=None, help="generation date (default: today)")
+    sn = sub.add_parser(
+        "sintetico", help="synthetic 'mis pozos' dataset from public wells with noise (ADR-030)"
+    )
+    sn.add_argument("--n", type=int, default=30, help="wells to derive (20-50 is the documented range)")
+    sn.add_argument("--semilla", type=int, default=7)
+    sn.add_argument("--salida", type=Path, default=None, help="folder (default: data/sintetico/<date>/)")
     df_ = sub.add_parser("diff", help="differences between two dated downloads in data/raw/")
     df_.add_argument("--a", default=None, help="earlier download folder (YYYY-MM-DD)")
     df_.add_argument("--b", default=None, help="later download folder (YYYY-MM-DD)")
@@ -95,6 +102,11 @@ def main(argv: list[str] | None = None) -> int:
         from vma.site import run
 
         run(ROOT, today=args.day)
+        return 0
+    if args.cmd == "sintetico":
+        from vma.propios.sintetico import run
+
+        run(ROOT, n=args.n, semilla=args.semilla, salida=args.salida)
         return 0
     if args.cmd == "diff":
         from vma.diff import run

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import duckdb
 import pandas as pd
@@ -40,6 +41,7 @@ class Datos:
     fecha_descarga: str | None
     version_maestro: str | None
     meta: dict = field(default_factory=dict)
+    propios: Any = None  # the user's wells loaded this session (vma.propios.cargar.MisPozos), never persisted
     _columnas: dict[str, list[tuple[str, str]]] = field(default_factory=dict, repr=False)
 
     # --- schema -----------------------------------------------------------------------------------------

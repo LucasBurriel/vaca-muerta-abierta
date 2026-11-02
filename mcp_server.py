@@ -126,6 +126,63 @@ def construir(d: D.Datos, con_sql: bool):
             mes_max=mes_max,
         )
 
+    # --- F5: the user's own wells (ADR-030); data stays in this process ---------------------------------------
+
+    @mcp.tool(description=H.descripcion("cargar_mis_pozos"))
+    def cargar_mis_pozos(ruta: str, mapeo: dict | None = None, ruta_pozos: str | None = None) -> str:
+        return _correr("cargar_mis_pozos", ruta=ruta, mapeo=mapeo, ruta_pozos=ruta_pozos)
+
+    @mcp.tool(description=H.descripcion("comparar_mi_pozo"))
+    def comparar_mi_pozo(
+        sigla: str,
+        tasa: str = "petroleo_m3_d",
+        cohorte_ref: int | None = None,
+        incluye_outliers: bool = True,
+        mes_max: int = 36,
+    ) -> str:
+        return _correr(
+            "comparar_mi_pozo",
+            sigla=sigla,
+            tasa=tasa,
+            cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+            mes_max=mes_max,
+        )
+
+    @mcp.tool(description=H.descripcion("comparar_mi_campania"))
+    def comparar_mi_campania(
+        filtros: dict | None = None,
+        metrica: str = "ip90_petroleo_m3_d_por_m",
+        cohorte_ref: int | None = None,
+        incluye_outliers: bool = True,
+    ) -> str:
+        return _correr(
+            "comparar_mi_campania",
+            filtros=filtros or {},
+            metrica=metrica,
+            cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+        )
+
+    @mcp.tool(description=H.descripcion("brechas"))
+    def brechas(
+        sigla: str | None = None,
+        filtros: dict | None = None,
+        tasa: str = "petroleo_m3_d",
+        cohorte_ref: int | None = None,
+        incluye_outliers: bool = True,
+        mes_max: int = 24,
+    ) -> str:
+        return _correr(
+            "brechas",
+            sigla=sigla,
+            filtros=filtros,
+            tasa=tasa,
+            cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+            mes_max=mes_max,
+        )
+
     if con_sql:
 
         @mcp.tool(description=H.descripcion("sql_solo_lectura"))

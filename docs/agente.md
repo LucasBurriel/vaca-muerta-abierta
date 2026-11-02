@@ -46,6 +46,10 @@ Every tool returns the same envelope, and the model is told to quote `cita` next
 | `comparar_grupo` | `formacion`, `cohorte?`, `dimension` ∈ operadora, ventana, cohorte, area, formacion; `metrica`, `n_min` (5), `incluye_outliers`, `ventana?` | Compara una métrica de indicadores entre grupos de una formación: median, P25, P75, `n_pozos`, `n_con_dato` per group; groups under `n_min` listed apart with null statistics; how many wells have no value and by which flag | `indicadores` |
 | `ranking` | `metrica`, `filtros` {formacion, cohorte, cohorte_desde, cohorte_hasta, ventana, operadora, area}, `n_min`, `por`, `orden`, `top`, `incluye_outliers` | Ordena grupos (por = operadora \| area \| formacion \| cohorte \| ventana) por la mediana de una métrica, with `n_pozos` and `n_con_dato`; warns when the ranking mixes fluid windows or formations | `indicadores` |
 | `curva_tipo` | `nivel`, `claves` {cohorte, formacion[, ventana \| operadora]}, `incluye_outliers`, `tasa`, `mes_max` | Curva tipo publicada de un grupo: P10/P50/P90 (petroleum convention) per month since first production with `n_pozos`; months under 5 wells come with null statistics and the reason (ADR-017) | `curvas_tipo` |
+| `cargar_mis_pozos` | `ruta`, `mapeo?`, `ruta_pozos?` | **F5.** Carga en la sesión un CSV o Parquet propio con producción mensual por pozo, computes the user's indicators with the published rules and registers `mis_produccion`, `mis_pozos`, `mis_indicadores`; nothing is written (docs/mis-datos.md) | the session views |
+| `comparar_mi_pozo` | `sigla`, `tasa`, `cohorte_ref?`, `incluye_outliers`, `mes_max` | **F5.** Mi pozo contra la curva tipo publicada de su grupo: monthly rate vs P10/P50/P90, estimated percentile, ratio to P50; IP90, IP90/m and 12-month cumulative vs the public group's median with the share of public wells beaten | `mis_produccion × curvas_tipo + indicadores` |
+| `comparar_mi_campania` | `filtros` {campania, formacion, cohorte, ventana, siglas}, `metrica`, `cohorte_ref?`, `incluye_outliers` | **F5.** Mis pozos (filtros: campania, formacion, cohorte, ventana, siglas) contra sus grupos públicos, one row per well with its own group's median, ratio and rank, plus the campaign summary | `mis_indicadores × indicadores` |
+| `brechas` | `sigla?` or `filtros`, `tasa`, `cohorte_ref?`, `incluye_outliers`, `mes_max` | **F5.** Dónde y cuánto están mis pozos por debajo del P50 de su grupo público: per month and cumulated, in rate and in volume, with the months below by stretch and the worst month | `mis_produccion × curvas_tipo` |
 | `sql_solo_lectura` | `sql`, `limite` | **Opt-in (`--sql`).** SELECT libre sobre pozos, indicadores y curvas_tipo: only SELECT/WITH, only those three tables, no file or system functions, no `;`, LIMIT forced (200), 10 s timeout. The citation is the query itself; the risk (a subtly wrong query that looks right) is documented in ADR-025 | the query |
 
 Metrics (`metrica`) are the numeric columns of `indicadores` listed in `H.METRICAS` with their unit: laterals and
@@ -53,6 +57,13 @@ completion intensities, IP30/90/180 (per fluid, total and per metre), cumulative
 cut. Formation and operator names are resolved loosely (`vaca muerta`, `operadora a`) to the canonical spelling and
 the citation shows the resolved value. Everything is **in-scope only** (`en_alcance`, ADR-002) and **flagged outliers
 stay in** unless `incluye_outliers=false`, in which case the exclusion is listed (ADR-018).
+
+### The user's own wells (F5)
+
+The four `mis_*` tools work on a file the user loads for the session (`cargar_mis_pozos`); the data stays in the
+process and is never written or sent (ADR-030). Schema, mapping, validation messages, the comparison rules and the
+synthetic dataset used in tests and examples are in [docs/mis-datos.md](mis-datos.md). Without a loaded file the
+three comparison tools answer *no hay datos propios cargados en esta sesión*.
 
 ### Parquet vs JSON
 
