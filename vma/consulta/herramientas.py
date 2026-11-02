@@ -23,12 +23,16 @@ import threading
 from datetime import date, datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from vma.consulta.datos import DOCS, NIVELES, TABLAS, Datos
 from vma.normalize import formation_key, operator_key, sigla_l2, sigla_l3, sigla_l4
 from vma.propios import cargar as P
 from vma.propios import comparar as K
+from vma.simulacion import campania as SC
+from vma.simulacion import declinacion as DC
+from vma.simulacion import series as SS
 
 SIG = 4  # significant digits in every number returned (the site uses the same, vma/site.py)
 MAX_FILAS = 50  # rows a tool returns at most; the tool says when it cut
@@ -969,6 +973,371 @@ def brechas(
     )
 
 
+# --- simulation: decline fits and campaign Monte Carlo (F5, ADR-031) -----------------------------------------------
+
+NOTA_SIMULACION = (
+    "esto es análisis de curvas de declinación sobre datos públicos, no simulación de reservorio: no hay presiones, "
+    "PVT ni geología; el EUR es el volumen que implica la curva ajustada, no una reserva (docs/simulacion.md)"
+)
+DOC_SIMULACION = "docs/simulacion.md"
+MODELOS_TOOL = ("auto", *DC.MODELOS)
+
+
+def _serie_para_ajuste(serie: pd.DataFrame, tasa: str, omitir_meses: int):
+    base = tasa.removesuffix("_por_m")
+    vol_col = {
+        "petroleo_m3_d": "petroleo_m3",
+        "gas_mil_m3_d": "gas_mil_m3",
+        "equivalente_m3_d": "equivalente_m3",
+    }[base]
+    s = serie[serie.tef_d > 0].copy()
+    s["q"] = s[vol_col] / s.tef_d
+    ajuste = s[(s.mes >= int(omitir_meses)) & (s.q > 0)]
+    uptime = float(serie.tef_d.sum() / serie.dias_mes.sum()) if serie.dias_mes.sum() else 1.0
+    return s, ajuste, vol_col, min(max(uptime, 0.05), 1.0)
+
+
+def _check_tasa_abs(tasa: str) -> None:
+    if tasa not in ("petroleo_m3_d", "gas_mil_m3_d", "equivalente_m3_d"):
+        raise ErrorHerramienta("tasa debe ser petroleo_m3_d, gas_mil_m3_d o equivalente_m3_d")
+
+
+def pronosticar_pozo(
+    d: Datos,
+    sigla: str,
+    mio: bool = False,
+    tasa: str = "petroleo_m3_d",
+    modelo: str = "auto",
+    horizonte_anios: int = 20,
+    omitir_meses: int = DC.OMITIR_MESES,
+    n_bootstrap: int = 200,
+    d_min_anual: float = DC.D_MIN_ANUAL,
+    q_min: float | None = None,
+    uptime: float | None = None,
+) -> dict:
+    """Ajusta la declinación de un pozo (público por sigla_clave, o mío con mio=true) con Arps exponencial,
+    hiperbólico (con declinación terminal d_min_anual), armónico o Duong, elige por AIC si modelo=auto, y
+    pronostica hasta horizonte_anios (20 o 30): EUR, EUR restante, acumulado por año, parámetros, y la banda
+    P10/P50/P90 del EUR por bootstrap de residuos (n_bootstrap réplicas). Usa la tasa por día efectivo, omite los
+    primeros omitir_meses meses (limpieza), integra con el uptime observado (o el dado) y corta en q_min si se
+    pasa. El pozo público necesita la fuente parquet y data/raw; si no, usar pronosticar_curva_tipo. No es
+    simulación de reservorio."""
+    _check_tasa_abs(tasa)
+    if modelo not in MODELOS_TOOL:
+        raise ErrorHerramienta(f"modelo debe ser uno de {', '.join(MODELOS_TOOL)}")
+    if horizonte_anios not in (10, 15, 20, 25, 30):
+        raise ErrorHerramienta("horizonte_anios debe ser 10, 15, 20, 25 o 30")
+    try:
+        serie, meta = SS.serie_mia(d, sigla) if mio else SS.serie_publica(d, sigla)
+    except SS.SinSerie as e:
+        raise ErrorHerramienta(str(e)) from e
+    s, aj_df, vol_col, uptime_obs = _serie_para_ajuste(serie, tasa, omitir_meses)
+    up = float(uptime) if uptime is not None else uptime_obs
+    try:
+        if modelo == "auto":
+            ajuste, tabla = DC.ajustar_auto(aj_df.mes.to_numpy() + 0.5, aj_df.q.to_numpy())
+        else:
+            ajuste = DC.ajustar(aj_df.mes.to_numpy() + 0.5, aj_df.q.to_numpy(), modelo)
+            tabla = [{"modelo": modelo, "aic": ajuste.aic, "rmse_log": ajuste.rmse_log, "elegido": True}]
+    except DC.ErrorAjuste as e:
+        raise ErrorHerramienta(str(e)) from e
+    H_m = int(horizonte_anios) * 12
+    pr = DC.pronosticar(ajuste, s.mes.to_numpy(), s[vol_col].to_numpy(), up, H_m, q_min, d_min_anual)
+    if n_bootstrap and n_bootstrap > 0:
+        pr.bootstrap = DC.bootstrap_eur(
+            ajuste,
+            s.mes.to_numpy(),
+            s[vol_col].to_numpy(),
+            up,
+            H_m,
+            q_min,
+            d_min_anual,
+            n=min(int(n_bootstrap), 1000),
+        )
+    res = DC.resumen_pronostico(pr)
+    res["comparacion_modelos"] = tabla
+    res["historia"] = {
+        "n_meses": int(len(serie)),
+        "n_meses_ajustados": int(len(aj_df)),
+        "omitidos": int(omitir_meses),
+        "ultimo_mes": int(serie.mes.max()),
+        "ultima_tasa": float(s.q.iloc[-1]) if len(s) else None,
+        "uptime_observado": uptime_obs,
+    }
+    res["pozo"] = meta
+    res["tasa"] = tasa
+    unidad = {"petroleo_m3_d": "m³", "gas_mil_m3_d": "mil m³", "equivalente_m3_d": "m³ eq"}[tasa]
+    res["unidad_volumen"] = unidad
+    notas = [NOTA_DIAS, NOTA_SIMULACION]
+    if meta.get("sintetico"):
+        notas.append("DATOS SINTÉTICOS: el pozo mío es derivado de pozos públicos con ruido (ADR-030)")
+    if mio:
+        notas.append(NOTA_PROPIOS)
+    if ajuste.modelo == "hiperbolico" and ajuste.parametros.get("b", 0) > 1:
+        notas.append(
+            f"b = {ajuste.parametros['b']:.2f} > 1: sin la declinación terminal d_min_anual el EUR divergiría; se aplica (Arps modificado)"
+        )
+    if len(aj_df) < 12:
+        notas.append(
+            f"sólo {len(aj_df)} meses ajustados: el pronóstico es débil, la banda lo refleja parcialmente"
+        )
+    if pr.bootstrap.get("sin_dato_porque"):
+        notas.append("banda: " + pr.bootstrap["sin_dato_porque"])
+    notas.append(
+        "la banda bootstrap mide la incertidumbre del ajuste a esta historia, no la de un cambio de régimen (interferencia, rebaje, cierre)"
+    )
+    return _envolver(
+        _redondear(res),
+        d=d,
+        tabla="mis_produccion (sesión)" if mio else "pozos + data/raw produccion_nc",
+        columnas=["mes", "tef_d", vol_col],
+        filtros={
+            "sigla": sigla,
+            "mio": mio,
+            "tasa": tasa,
+            "modelo": modelo,
+            "horizonte_anios": horizonte_anios,
+            "omitir_meses": omitir_meses,
+            "n_bootstrap": n_bootstrap,
+            "d_min_anual": d_min_anual,
+            "q_min": q_min,
+            "uptime": up,
+        },
+        regla_doc=f"{DOC_SIMULACION}#pronosticar_pozo; ADR-016, ADR-031",
+        notas=notas,
+    )
+
+
+def pronosticar_curva_tipo(
+    d: Datos,
+    nivel: str,
+    claves: dict,
+    tasa: str = "petroleo_m3_d",
+    modelo: str = "auto",
+    horizonte_anios: int = 20,
+    incluye_outliers: bool = True,
+    omitir_meses: int = DC.OMITIR_MESES,
+    d_min_anual: float = DC.D_MIN_ANUAL,
+    uptime: float = 0.92,
+    q_min: float | None = None,
+) -> dict:
+    """Ajusta la declinación de la curva tipo publicada de un grupo (P50, y P10 y P90 por separado) y pronostica el
+    pozo tipo hasta horizonte_anios: EUR del P50 con la banda dada por los ajustes del P10 y del P90, parámetros,
+    acumulado por año. Funciona con la fuente json (curvas hasta el mes 60). nivel y claves como en curva_tipo.
+    uptime (días efectivos / calendario) por defecto 0.92. No es simulación de reservorio."""
+    _check_tasa_abs(tasa)
+    if modelo not in MODELOS_TOOL:
+        raise ErrorHerramienta(f"modelo debe ser uno de {', '.join(MODELOS_TOOL)}")
+    if horizonte_anios not in (10, 15, 20, 25, 30):
+        raise ErrorHerramienta("horizonte_anios debe ser 10, 15, 20, 25 o 30")
+    base = curva_tipo(d, nivel, claves, incluye_outliers=incluye_outliers, tasa=tasa, mes_max=600)
+    meses = [m for m in base["datos"]["meses"] if m.get("p50") is not None]
+    if len(meses) < DC.MIN_PUNTOS:
+        raise ErrorHerramienta(f"la curva tiene {len(meses)} meses publicables; se necesitan {DC.MIN_PUNTOS}")
+    t = np.array([m["mes"] for m in meses], dtype=float)
+    H_m = int(horizonte_anios) * 12
+    out: dict = {"tasa": tasa, "grupo": base["cita"]["filtros"], "cuantiles": {}}
+    for est in ("p50", "p10", "p90"):
+        q = np.array([m[est] if m.get(est) is not None else np.nan for m in meses], dtype=float)
+        sel = (t >= omitir_meses) & np.isfinite(q) & (q > 0)
+        if sel.sum() < max(DC.MIN_PUNTOS, 0.5 * (t >= omitir_meses).sum()):
+            out["cuantiles"][est] = {
+                "sin_dato_porque": (
+                    f"el cuantil {est} es 0 o nulo en más de la mitad de los meses (grupo que mezcla ventanas de "
+                    "fluido o con pocos pozos, ADR-020): no se ajusta"
+                )
+            }
+            continue
+        try:
+            if modelo == "auto":
+                aj, tabla = DC.ajustar_auto(t[sel] + 0.5, q[sel])
+            else:
+                aj = DC.ajustar(t[sel] + 0.5, q[sel], modelo)
+                tabla = [{"modelo": modelo, "aic": aj.aic, "elegido": True}]
+        except DC.ErrorAjuste as e:
+            out["cuantiles"][est] = {"sin_dato_porque": str(e)}
+            continue
+        # the type curve has no "history volume": integrate the published months at the given uptime, then the fit
+        vol_hist = q[np.isfinite(q)] * DC.DIAS_MES * uptime
+        mes_hist = t[np.isfinite(q)].astype(int)
+        pr = DC.pronosticar(aj, mes_hist, vol_hist, uptime, H_m, q_min, d_min_anual)
+        r = DC.resumen_pronostico(pr)
+        r["comparacion_modelos"] = tabla
+        r.pop("banda_bootstrap", None)
+        r.pop("historia_acumulada", None)
+        r.pop("eur_restante", None)
+        out["cuantiles"][est] = r
+    if "eur" not in out["cuantiles"].get("p50", {}):
+        raise ErrorHerramienta("no se pudo ajustar el P50: " + str(out["cuantiles"].get("p50")))
+    out["eur_pozo_tipo"] = {
+        "p50": out["cuantiles"]["p50"]["eur"],
+        "p10": out["cuantiles"].get("p10", {}).get("eur"),
+        "p90": out["cuantiles"].get("p90", {}).get("eur"),
+        "modelo_p50": out["cuantiles"]["p50"]["modelo"],
+        "meses_publicados": len(meses),
+        "uptime": uptime,
+    }
+    unidad = {"petroleo_m3_d": "m³", "gas_mil_m3_d": "mil m³", "equivalente_m3_d": "m³ eq"}[tasa]
+    out["unidad_volumen"] = unidad
+    notas = [
+        NOTA_DIAS,
+        NOTA_SIMULACION,
+        "la banda P10/P90 es el ajuste de las curvas P10 y P90 publicadas, no un intervalo del P50",
+    ]
+    if d.fuente == "json":
+        notas.append(
+            "fuente json: la curva llega hasta el mes 60 (ADR-023); el ajuste se extrapola desde ahí"
+        )
+    return _envolver(
+        _redondear(out),
+        d=d,
+        tabla="curvas_tipo",
+        columnas=["mes", f"{tasa}_p10", f"{tasa}_p50", f"{tasa}_p90"],
+        filtros={
+            **base["cita"]["filtros"],
+            "tasa": tasa,
+            "modelo": modelo,
+            "horizonte_anios": horizonte_anios,
+            "omitir_meses": omitir_meses,
+            "d_min_anual": d_min_anual,
+            "uptime": uptime,
+            "q_min": q_min,
+        },
+        regla_doc=f"{DOC_SIMULACION}#pronosticar_curva_tipo; ADR-017, ADR-031",
+        exclusiones=base["exclusiones"],
+        notas=notas,
+    )
+
+
+def simular_campania(
+    d: Datos,
+    formacion: str,
+    n_pozos: int,
+    meses: int = 120,
+    ventana: str | None = None,
+    cohorte_ref: int | None = None,
+    rama_m: float | None = None,
+    ritmo_pozos_por_mes: int | None = None,
+    tasa: str = "petroleo_m3_d",
+    n_sim: int = 500,
+    semilla: int = 0,
+    uptime: float = 0.92,
+    incluye_outliers: bool = True,
+) -> dict:
+    """Monte Carlo de una campaña de n_pozos pozos nuevos muestreados de la curva tipo publicada de formacion ×
+    cohorte_ref (× ventana si se da): cada pozo simulado toma una posición en el grupo y su tasa mes a mes sale de
+    los P10/P50/P90 publicados; si se pasa rama_m y el grupo tiene curva por metro, escala por la rama. Los pozos
+    entran a ritmo_pozos_por_mes (por defecto todos en el mes 0). Devuelve por mes P10/P50/P90 y media de la tasa
+    agregada y del acumulado, pozos en línea, y el acumulado final con banda. La banda es la dispersión publicada
+    entre pozos, nada más: sin interferencia, sin instalaciones, sin precio. No es simulación de reservorio."""
+    _check_tasa_abs(tasa)
+    f = _resolver_formacion(d, formacion)
+    if f is None:
+        raise ErrorHerramienta(f"formación {formacion!r} no existe en indicadores.formacion")
+    if cohorte_ref is None:
+        (cohorte_ref,) = d.con.execute(
+            "SELECT max(cohorte) FROM curvas_tipo WHERE formacion = ? AND nivel = 'cohorte_formacion' AND publicable AND mes >= 12",
+            [f],
+        ).fetchone()
+        if cohorte_ref is None:
+            raise ErrorHerramienta(f"ninguna cohorte de {f} tiene 12 meses publicables; pasá cohorte_ref")
+    if ventana is not None and ventana not in ("petroleo", "volatil_condensado", "gas"):
+        raise ErrorHerramienta("ventana debe ser petroleo, volatil_condensado o gas")
+    nivel = "cohorte_formacion_ventana" if ventana else "cohorte_formacion"
+    preds = ["nivel = ?", "cohorte = ?", "formacion = ?", "incluye_outliers = ?"]
+    params: list = [nivel, int(cohorte_ref), f, bool(incluye_outliers)]
+    if ventana:
+        preds.append("ventana = ?")
+        params.append(ventana)
+    por_metro = bool(rama_m) and d.tiene("curvas_tipo", f"{tasa}_por_m_p50")
+    col = f"{tasa}_por_m" if por_metro else tasa
+    curva = d.df(
+        f"SELECT mes, {col}_p10 AS p10, {col}_p50 AS p50, {col}_p90 AS p90 FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes",
+        params,
+    )
+    if por_metro and curva.p50.notna().sum() < DC.MIN_PUNTOS:
+        por_metro = False
+        col = tasa
+        curva = d.df(
+            f"SELECT mes, {col}_p10 AS p10, {col}_p50 AS p50, {col}_p90 AS p90 FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes",
+            params,
+        )
+    if curva.p50.notna().sum() < DC.MIN_PUNTOS:
+        raise ErrorHerramienta(
+            f"la curva {nivel} de {f} cohorte {cohorte_ref}"
+            + (f" ventana {ventana}" if ventana else "")
+            + f" tiene menos de {DC.MIN_PUNTOS} meses publicables (ADR-017); probá otra cohorte_ref o sin ventana"
+        )
+    try:
+        r = SC.simular(
+            curva,
+            n_pozos=n_pozos,
+            meses=meses,
+            rama_m=rama_m,
+            por_metro=por_metro,
+            ritmo=ritmo_pozos_por_mes,
+            n_sim=n_sim,
+            semilla=semilla,
+            uptime=uptime,
+        )
+    except SC.ErrorSimulacion as e:
+        raise ErrorHerramienta(str(e)) from e
+    r["grupo"] = {
+        "nivel": nivel,
+        "cohorte_ref": int(cohorte_ref),
+        "formacion": f,
+        "ventana": ventana,
+        "incluye_outliers": incluye_outliers,
+        "curva": col,
+    }
+    r["tasa"] = tasa
+    r["unidad_volumen"] = {"petroleo_m3_d": "m³", "gas_mil_m3_d": "mil m³", "equivalente_m3_d": "m³ eq"}[tasa]
+    notas = [
+        NOTA_DIAS,
+        NOTA_SIMULACION,
+        "la banda es la dispersión entre pozos de la curva publicada (posición sorteada por pozo, con ruido mensual); sin interferencia padre-hijo, sin restricción de instalaciones, sin precio",
+    ]
+    if rama_m and not por_metro:
+        notas.append(
+            "rama_m ignorada: el grupo no tiene curva por metro publicable; se usó la curva absoluta"
+        )
+    if r["meses_extrapolados"]:
+        notas.append(
+            f"{r['meses_extrapolados']} meses más allá de la curva publicada: extrapolados con un ajuste hiperbólico de cada cuantil (d_min {DC.D_MIN_ANUAL:.0%} anual)"
+        )
+    if not ventana:
+        notas.append(
+            "sin ventana: la curva mezcla ventanas de fluido (ADR-020); pasá ventana para una campaña homogénea"
+        )
+    exclusiones = (
+        [] if incluye_outliers else ["pozos con outlier_ip90_m = True excluidos de la curva (ADR-018)"]
+    )
+    # keep the envelope small: monthly bands at 3 significant digits already via _redondear; drop the mean series if long
+    return _envolver(
+        _redondear(r),
+        d=d,
+        tabla="curvas_tipo",
+        columnas=["mes", f"{col}_p10", f"{col}_p50", f"{col}_p90"],
+        filtros={
+            "formacion": f,
+            "cohorte_ref": int(cohorte_ref),
+            "ventana": ventana,
+            "n_pozos": n_pozos,
+            "meses": meses,
+            "rama_m": rama_m,
+            "ritmo_pozos_por_mes": ritmo_pozos_por_mes,
+            "tasa": tasa,
+            "n_sim": n_sim,
+            "semilla": semilla,
+            "uptime": uptime,
+            "incluye_outliers": incluye_outliers,
+        },
+        regla_doc=f"{DOC_SIMULACION}#simular_campania; ADR-017, ADR-031",
+        exclusiones=exclusiones,
+        notas=notas,
+    )
+
+
 # --- opt-in: read-only SQL ------------------------------------------------------------------------------------
 
 _SQL_PROHIBIDO = re.compile(
@@ -1188,6 +1557,78 @@ HERRAMIENTAS.update(
                     "mes_max": _INT,
                 },
                 [],
+            ),
+        },
+    }
+)
+_NUM = {"type": "number"}
+_TASA_ABS = {"type": "string", "enum": ["petroleo_m3_d", "gas_mil_m3_d", "equivalente_m3_d"]}
+HERRAMIENTAS.update(
+    {
+        "pronosticar_pozo": {
+            "fn": pronosticar_pozo,
+            "schema": _schema(
+                {
+                    "sigla": _STR,
+                    "mio": _BOOL,
+                    "tasa": _TASA_ABS,
+                    "modelo": {"type": "string", "enum": list(MODELOS_TOOL)},
+                    "horizonte_anios": {"type": "integer", "enum": [10, 15, 20, 25, 30]},
+                    "omitir_meses": _INT,
+                    "n_bootstrap": _INT,
+                    "d_min_anual": _NUM,
+                    "q_min": _NUM,
+                    "uptime": _NUM,
+                },
+                ["sigla"],
+            ),
+        },
+        "pronosticar_curva_tipo": {
+            "fn": pronosticar_curva_tipo,
+            "schema": _schema(
+                {
+                    "nivel": {"type": "string", "enum": list(NIVELES)},
+                    "claves": {
+                        "type": "object",
+                        "properties": {
+                            "cohorte": _INT,
+                            "formacion": _STR,
+                            "ventana": _STR,
+                            "operadora": _STR,
+                        },
+                        "required": ["cohorte", "formacion"],
+                        "additionalProperties": False,
+                    },
+                    "tasa": _TASA_ABS,
+                    "modelo": {"type": "string", "enum": list(MODELOS_TOOL)},
+                    "horizonte_anios": {"type": "integer", "enum": [10, 15, 20, 25, 30]},
+                    "incluye_outliers": _BOOL,
+                    "omitir_meses": _INT,
+                    "d_min_anual": _NUM,
+                    "uptime": _NUM,
+                    "q_min": _NUM,
+                },
+                ["nivel", "claves"],
+            ),
+        },
+        "simular_campania": {
+            "fn": simular_campania,
+            "schema": _schema(
+                {
+                    "formacion": _STR,
+                    "n_pozos": _INT,
+                    "meses": _INT,
+                    "ventana": {"type": "string", "enum": ["petroleo", "volatil_condensado", "gas"]},
+                    "cohorte_ref": _INT,
+                    "rama_m": _NUM,
+                    "ritmo_pozos_por_mes": _INT,
+                    "tasa": _TASA_ABS,
+                    "n_sim": _INT,
+                    "semilla": _INT,
+                    "uptime": _NUM,
+                    "incluye_outliers": _BOOL,
+                },
+                ["formacion", "n_pozos"],
             ),
         },
     }

@@ -502,3 +502,30 @@ the loader does to it. Units are not converted and outliers are not flagged on t
 population); both are limits written in `docs/mis-datos.md`. The synthetic dataset keeps the repo honest: no
 transcript or screenshot in the repo shows a real operator's private well. A second `cargar_mis_pozos` replaces the
 first; multi-dataset sessions are a later need.
+
+## ADR-031 · Simulation is decline-curve analysis and published-dispersion Monte Carlo, declared as such; linear-algebra fits, no optimiser (2026-11-02)
+
+**Context.** The author is drawn to visualisation and simulation, and operators asked "what would n wells like
+these give". The public data has monthly volumes and producing days per well and nothing of the reservoir. A tool
+called "simulation" that silently assumed pressures or PVT would be the kind of confident, uncited number the rest
+of the project exists to avoid.
+
+**Decision.** `vma/simulacion/` does two things and names them. (1) **Decline fits** of a single series (a public
+well's months from the raw file, a user's well, or a published quantile curve): Arps exponential, hyperbolic with a
+terminal decline, harmonic, and Duong, fitted by least squares on log rate with linear algebra on a grid of the
+non-linear parameter (`b`, `m`); model chosen by AIC unless named; EUR by integrating to 10-30 years with the
+observed uptime and an optional economic limit; a band from a residual bootstrap that refits the same model. No
+SciPy, no optimiser: deterministic, dependency-free, and the grid resolution is documented as the precision. (2)
+**Campaign Monte Carlo** that samples wells from a published type curve: a persistent percentile per well with
+monthly jitter, rates read off P90/P50/P10 by log-linear interpolation (the inverse of the comparison percentile),
+per-metre scaling when the per-metre curve exists, staggered starts, hyperbolic extension of each quantile beyond
+the published months; aggregated P10/P50/P90 of rate and cumulative. Every result carries the note "no es
+simulación de reservorio" and says what the band measures (fit uncertainty; published dispersion) and what it does
+not (regime changes, interference, facilities, price).
+
+**Consequences.** A manager gets orders of magnitude and comparable scenarios with the same yardstick, each
+number cited to its curve and its parameters; an engineer can read the assumptions in one page
+(`docs/simulacion.md`) and disagree with a parameter instead of a black box. A public well's own series needs the
+Parquet source plus the raw download, so a fresh clone gets the type-curve variant and a message, not a guess. The
+grid fits are coarser than a proper optimiser near the optimum and the i.i.d. bootstrap understates the band
+under autocorrelation; both are written down as limits rather than hidden.

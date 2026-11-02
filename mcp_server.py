@@ -183,6 +183,93 @@ def construir(d: D.Datos, con_sql: bool):
             mes_max=mes_max,
         )
 
+    # --- F5: decline fits and campaign Monte Carlo (ADR-031) ------------------------------------------------------
+
+    @mcp.tool(description=H.descripcion("pronosticar_pozo"))
+    def pronosticar_pozo(
+        sigla: str,
+        mio: bool = False,
+        tasa: str = "petroleo_m3_d",
+        modelo: str = "auto",
+        horizonte_anios: int = 20,
+        omitir_meses: int = 2,
+        n_bootstrap: int = 200,
+        d_min_anual: float = 0.06,
+        q_min: float | None = None,
+        uptime: float | None = None,
+    ) -> str:
+        return _correr(
+            "pronosticar_pozo",
+            sigla=sigla,
+            mio=mio,
+            tasa=tasa,
+            modelo=modelo,
+            horizonte_anios=horizonte_anios,
+            omitir_meses=omitir_meses,
+            n_bootstrap=n_bootstrap,
+            d_min_anual=d_min_anual,
+            q_min=q_min,
+            uptime=uptime,
+        )
+
+    @mcp.tool(description=H.descripcion("pronosticar_curva_tipo"))
+    def pronosticar_curva_tipo(
+        nivel: str,
+        claves: dict,
+        tasa: str = "petroleo_m3_d",
+        modelo: str = "auto",
+        horizonte_anios: int = 20,
+        incluye_outliers: bool = True,
+        omitir_meses: int = 2,
+        d_min_anual: float = 0.06,
+        uptime: float = 0.92,
+        q_min: float | None = None,
+    ) -> str:
+        return _correr(
+            "pronosticar_curva_tipo",
+            nivel=nivel,
+            claves=claves,
+            tasa=tasa,
+            modelo=modelo,
+            horizonte_anios=horizonte_anios,
+            incluye_outliers=incluye_outliers,
+            omitir_meses=omitir_meses,
+            d_min_anual=d_min_anual,
+            uptime=uptime,
+            q_min=q_min,
+        )
+
+    @mcp.tool(description=H.descripcion("simular_campania"))
+    def simular_campania(
+        formacion: str,
+        n_pozos: int,
+        meses: int = 120,
+        ventana: str | None = None,
+        cohorte_ref: int | None = None,
+        rama_m: float | None = None,
+        ritmo_pozos_por_mes: int | None = None,
+        tasa: str = "petroleo_m3_d",
+        n_sim: int = 500,
+        semilla: int = 0,
+        uptime: float = 0.92,
+        incluye_outliers: bool = True,
+    ) -> str:
+        return _correr(
+            "simular_campania",
+            formacion=formacion,
+            n_pozos=n_pozos,
+            meses=meses,
+            ventana=ventana,
+            cohorte_ref=cohorte_ref,
+            rama_m=rama_m,
+            ritmo_pozos_por_mes=ritmo_pozos_por_mes,
+            tasa=tasa,
+            n_sim=n_sim,
+            semilla=semilla,
+            uptime=uptime,
+            incluye_outliers=incluye_outliers,
+        )
+
     if con_sql:
 
         @mcp.tool(description=H.descripcion("sql_solo_lectura"))

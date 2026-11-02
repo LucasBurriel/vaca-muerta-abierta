@@ -435,6 +435,13 @@ def test_every_tool_result_carries_a_citation(d):
         ("comparar_mi_pozo", {"sigla": "MIO-003", "mes_max": 3}),
         ("comparar_mi_campania", {"filtros": {"cohorte": 2024}, "metrica": "ip90_petroleo_m3_d"}),
         ("brechas", {"filtros": {"cohorte": 2024}, "mes_max": 3}),
+        # F5: decline fits and campaign Monte Carlo (ADR-031)
+        ("pronosticar_pozo", {"sigla": "MIO-002", "mio": True, "n_bootstrap": 0}),
+        (
+            "pronosticar_curva_tipo",
+            {"nivel": "cohorte_formacion", "claves": {"cohorte": 2024, "formacion": "Vaca Muerta"}},
+        ),
+        ("simular_campania", {"formacion": "Vaca Muerta", "n_pozos": 3, "meses": 12, "n_sim": 20}),
     ]
     assert {n for n, _ in llamadas} == set(H.HERRAMIENTAS)
     for nombre, entrada in llamadas:
