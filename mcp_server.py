@@ -10,6 +10,9 @@ Claude Desktop (claude_desktop_config.json) / Claude Code (.mcp.json):
     {"mcpServers": {"vaca-muerta-abierta": {"command": "python",
       "args": ["C:/ruta/al/repo/mcp_server.py"]}}}
 
+Installed as a package (``pip install "vaca-muerta-abierta[mcp]"`` or ``uvx``), the entry point is ``vma-mcp``; without a
+clone it downloads the site's JSON snapshot once into ``~/.vaca-muerta-abierta/`` (``--datos`` or ``VMA_DATOS`` override).
+
 Every tool returns the same JSON envelope as the CLI agent: ``datos`` + ``cita`` (tabla, columnas, filtros,
 regla_doc) + ``exclusiones`` + ``notas`` + ``fecha_datos`` + ``version_maestro`` + ``fuente``. The server
 never writes: it opens the tables read-only and has no tool that changes anything. Needs ``pip install -e ".[agente]"``.
@@ -25,6 +28,7 @@ from pathlib import Path
 from vma import apps as APPS
 from vma.consulta import datos as D
 from vma.consulta import herramientas as H
+from vma.consulta import ubicacion as U
 
 ROOT = Path(__file__).resolve().parent
 
@@ -310,13 +314,18 @@ def main(argv: list[str] | None = None) -> int:
         prog="mcp_server.py", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--fuente", default="auto", choices=["auto", "parquet", "json"])
-    ap.add_argument("--datos", type=Path, default=ROOT)
+    ap.add_argument(
+        "--datos",
+        type=Path,
+        default=None,
+        help=f"raíz con site/data o data/publicado (default: el clon, ${U.ENV}, o el snapshot en {U.cache_dir()})",
+    )
     ap.add_argument("--sql", action="store_true", help="exponer sql_solo_lectura (ADR-025)")
     ap.add_argument(
         "--sin-apps", action="store_true", help="sin MCP Apps: ni _meta.ui ni recursos ui:// (ADR-032)"
     )
     args = ap.parse_args(argv)
-    d = D.abrir(args.datos, args.fuente)
+    d = D.abrir(U.raiz_datos(args.datos, ROOT), args.fuente)
     print(f"mcp vaca-muerta-abierta: {d.fuente} {d.ruta}, descargados {d.fecha_descarga}", file=sys.stderr)
     construir(d, args.sql, con_apps=not args.sin_apps).run(transport="stdio")
     return 0

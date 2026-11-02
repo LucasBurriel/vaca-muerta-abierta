@@ -146,6 +146,8 @@ _SIGLA = re.compile(
     r"\b[A-Za-z]{1,5}\.[A-Za-z]{2,3}\.[A-Za-z]{1,6}(?:\.\s?[A-Za-z]{1,4})?[-\s]?\d{1,5}(?:\([a-z]{1,2}\))?"
 )
 _COHORTE = re.compile(r"\b(20[0-3]\d)\b")
+_RUTA = re.compile(r"(?:[A-Za-z]:)?[\w./\\-]+\.(?:csv|parquet)\b")
+_MIO = re.compile(r"\bMIO-\d{3}\b", re.IGNORECASE)
 _VENTANAS = {"petróleo": "petroleo", "petroleo": "petroleo", "gas": "gas", "condensado": "volatil_condensado"}
 
 
@@ -179,7 +181,58 @@ class ProveedorMock:
         for f in ("lajas", "mulichinco", "los molles", "punta rosada", "precuyo", "quintuco", "vaca muerta"):
             if f in q:
                 formacion = f.title()
-        if sigla:
+        rutas = _RUTA.findall(pregunta)
+        mio = _MIO.search(pregunta)
+        propios = any(
+            w in q for w in ("mis pozos", "mi pozo", "mi campaña", "mi campania", "mis datos", "brecha")
+        )
+        if rutas and "cargar_mis_pozos" in nombres:
+            entrada = {"ruta": rutas[0]}
+            if len(rutas) > 1:
+                entrada["ruta_pozos"] = rutas[1]
+            plan.append(("cargar_mis_pozos", entrada))
+        if (propios or mio) and "comparar_mi_pozo" in nombres:
+            if "brecha" in q:
+                e: dict = {"mes_max": 12}
+                if mio:
+                    e["sigla"] = mio.group(0).upper()
+                elif "pad-" in q:
+                    e["filtros"] = {"campania": re.search(r"pad-[a-z]", q).group(0).upper()}
+                plan.append(("brechas", e))
+            elif any(w in q for w in ("pronóstic", "pronostic", "eur", "declinaci")) and mio:
+                plan.append(
+                    ("pronosticar_pozo", {"sigla": mio.group(0).upper(), "mio": True, "n_bootstrap": 100})
+                )
+            elif any(w in q for w in ("campaña", "campania", "ranking")) or ("pad-" in q and not mio):
+                f: dict = {}
+                m_pad = re.search(r"pad-[a-z]", q)
+                if m_pad:
+                    f["campania"] = m_pad.group(0).upper()
+                if cohortes:
+                    f["cohorte"] = cohortes[0]
+                plan.append(("comparar_mi_campania", {"filtros": f}))
+            elif mio:
+                plan.append(("comparar_mi_pozo", {"sigla": mio.group(0).upper(), "mes_max": 12}))
+            if plan:
+                return plan
+        if any(w in q for w in ("simul", "campaña de", "campania de")) and "simular_campania" in nombres:
+            n = re.search(r"(\d{1,3})\s+pozos", q)
+            e = {"formacion": formacion, "n_pozos": int(n.group(1)) if n else 10, "meses": 120, "n_sim": 300}
+            if ventana:
+                e["ventana"] = ventana
+            if cohortes:
+                e["cohorte_ref"] = cohortes[0]
+            rama = re.search(r"(\d{3,4})\s*m\b", q)
+            if rama:
+                e["rama_m"] = float(rama.group(1))
+            plan.append(("simular_campania", e))
+        elif (
+            sigla
+            and any(w in q for w in ("pronóstic", "pronostic", "eur", "declinaci"))
+            and "pronosticar_pozo" in nombres
+        ):
+            plan.append(("buscar_pozo", {"texto": sigla.group(0)}))
+        elif sigla:
             plan.append(("buscar_pozo", {"texto": sigla.group(0)}))
         elif any(w in q for w in ("fecha", "metadatos", "descarg", "versión", "version")):
             plan.append(("metadatos", {}))
@@ -254,6 +307,13 @@ class ProveedorMock:
         ultimo_uso, ultimo = resultados[-1]
         if ultimo_uso.get("name") == "buscar_pozo" and ultimo.get("datos", {}).get("pozos"):
             clave = ultimo["datos"]["pozos"][0]["sigla_clave"]
+            q = pregunta.lower()
+            if any(w in q for w in ("pronóstic", "pronostic", "eur", "declinaci")):
+                return {
+                    "content": [self._tool_use("pronosticar_pozo", {"sigla": clave, "n_bootstrap": 100})],
+                    "stop_reason": "tool_use",
+                    "usage": {},
+                }
             return {
                 "content": [self._tool_use("ficha_pozo", {"sigla_clave": clave})],
                 "stop_reason": "tool_use",
@@ -323,6 +383,74 @@ class ProveedorMock:
             elif nombre == "metadatos":
                 tablas = ", ".join(f"{t} {v['filas']} filas" for t, v in d.get("tablas", {}).items())
                 partes.append(f"- Datos: {tablas} {cita}")
+            elif nombre == "cargar_mis_pozos":
+                partes.append(
+                    f"- Mis pozos cargados: {d.get('n_pozos')} pozos, {d.get('filas_pozo_mes')} filas pozo-mes, "
+                    f"período {d.get('periodo')}, cohortes {d.get('pozos_por_cohorte')}"
+                    + (" — DATOS SINTÉTICOS" if d.get("sintetico") else "")
+                    + f" {cita}"
+                )
+            elif nombre == "comparar_mi_pozo":
+                p, g, rs = d.get("pozo", {}), d.get("grupo", {}), d.get("resumen", {})
+                partes.append(
+                    f"- Mi pozo {p.get('sigla_original')} contra {g.get('nivel')} {g.get('cohorte')}/{g.get('formacion')}"
+                    f"{'/' + g['ventana'] if g.get('ventana') else ''} ({d.get('tasa')}): percentil mediano P{rs.get('percentil_mediano')}, "
+                    f"{rs.get('meses_sobre_p50')} de {rs.get('n_meses_comparados')} meses sobre P50, mío/P50 mediano {rs.get('ratio_p50_mediano')} {cita}"
+                )
+                for k, v in d.get("indicadores_vs_grupo", {}).items():
+                    if "mio" in v:
+                        partes.append(
+                            f"  · {k}: mío {v['mio']} vs mediana pública {v['mediana_publica']} (n = {v['n_publico']}); "
+                            f"supera al {v['supera_pct_publicos']} % de los pozos públicos"
+                        )
+                for f in d.get("meses", [])[:3]:
+                    partes.append(
+                        f"  · mes {f.get('mes')}: mío {f.get('mio')}, P50 {f.get('p50')}, percentil P{f.get('percentil')}"
+                    )
+            elif nombre == "comparar_mi_campania":
+                rs = d.get("resumen", {})
+                partes.append(
+                    f"- Mi campaña ({d.get('metrica')}, filtros {d.get('filtros')}): {rs.get('n_comparados')} de {rs.get('n_mios')} "
+                    f"pozos comparados; mediana mía {rs.get('mediana_mia')} vs mediana de medianas públicas "
+                    f"{rs.get('mediana_de_medianas_publicas')}; {rs.get('pozos_sobre_mediana_publica')} pozos sobre la mediana pública; "
+                    f"supera % mediano {rs.get('supera_pct_mediano')} {cita}"
+                )
+                for f in d.get("pozos", [])[:4]:
+                    partes.append(
+                        f"  · {f.get('sigla')} ({f.get('grupo') or f.get('sin_dato_porque')}): mío {f.get('mio')}, "
+                        f"mediana pública {f.get('mediana_publica')}, supera {f.get('supera_pct_publicos')} %"
+                    )
+            elif nombre == "brechas":
+                t = d.get("total", {})
+                partes.append(
+                    f"- Brechas contra P50 ({d.get('tasa')}, hasta el mes {d.get('mes_max')}): acumulado mío {t.get('acum_mio')} "
+                    f"{d.get('unidad_volumen')} vs {t.get('acum_p50')} a P50, brecha {t.get('brecha_acum')} ({t.get('brecha_acum_pct')} %); "
+                    f"{t.get('pozos_debajo_p50_acum')} de {d.get('n_pozos')} pozos por debajo {cita}"
+                )
+                for f in d.get("pozos", [])[:3]:
+                    tr = f.get("tramos_debajo", {})
+                    partes.append(
+                        f"  · {f.get('sigla')}: {f.get('meses_debajo_p50')} de {f.get('meses_comparados')} meses debajo de P50 "
+                        f"(0-5: {tr.get('meses_0_5')}, 6-11: {tr.get('meses_6_11')}, 12+: {tr.get('meses_12_mas')}), brecha acumulada "
+                        f"{f.get('brecha_acum')} ({f.get('brecha_acum_pct')} %), peor mes {f.get('peor_mes', {}).get('mes')}"
+                    )
+            elif nombre == "pronosticar_pozo":
+                b = d.get("banda_bootstrap", {})
+                partes.append(
+                    f"- Pronóstico de {d.get('pozo', {}).get('sigla')} ({d.get('tasa')}): modelo {d.get('modelo')} {d.get('parametros')}, "
+                    f"{d.get('n_meses_ajustados')} meses ajustados, EUR a {d.get('horizonte_meses')} meses {d.get('eur')} {d.get('unidad_volumen')} "
+                    f"(histórico {d.get('historia_acumulada')}, restante {d.get('eur_restante')}); banda bootstrap P90 {b.get('eur_p90')} / "
+                    f"P50 {b.get('eur_p50')} / P10 {b.get('eur_p10')} ({b.get('n')} réplicas) {cita}"
+                )
+            elif nombre == "simular_campania":
+                f = d.get("final", {})
+                g = d.get("grupo", {})
+                partes.append(
+                    f"- Campaña simulada de {d.get('n_pozos')} pozos ({g.get('formacion')} {g.get('cohorte_ref')}"
+                    f"{', ' + g['ventana'] if g.get('ventana') else ''}, {d.get('n_sim')} corridas): acumulado a {d.get('meses')} meses "
+                    f"P90 {f.get('acumulado_p90')} / P50 {f.get('acumulado_p50')} / P10 {f.get('acumulado_p10')} {d.get('unidad_volumen')}; "
+                    f"por pozo P50 {f.get('por_pozo_p50')}; tasa pico P50 {f.get('tasa_pico_p50')} en el mes {f.get('mes_pico_p50')} {cita}"
+                )
             else:
                 partes.append(f"- {nombre}: {json.dumps(d, ensure_ascii=False)[:400]} {cita}")
             for e in r.get("exclusiones", []):

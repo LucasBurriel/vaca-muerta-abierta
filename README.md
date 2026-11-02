@@ -19,6 +19,86 @@ This repository builds an **open observatory** on top of it, in phases that each
 | **F2 · Indicators** | one row per well: IP30/90/180 in producing days, cumulatives at 6/12/24 months, everything per metre of lateral, GOR, water cut, fluid window, flags and lineage; type curves P10/P50/P90 by cohort × formation (× window, × operator) with `n_pozos`, published with and without outliers | **done** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
 | **F3 · Site** | static explorer: wells table with "no data because…" cells, type curves P10/P50/P90 with `n`, Leaflet map, method page; pre-aggregated JSON from the pipeline, rebuilt monthly by CI and deployed to GitHub Pages | **done** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
 | **F4 · Ask it questions** | a local agent (`agente.py`, CLI + chat) and an MCP server (`mcp_server.py`) over seven typed, read-only tools on the published tables; every result carries its citation (table, columns, filters, rule); a validator rejects any number the tools did not return; works on the committed JSON snapshot or on the Parquet tables | **done** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
+| **F5 · Compare your wells** | a "my data" module: load your own monthly production (CSV/Parquet) in the session, compare each well with the published type curve of its cohort × formation × window, each campaign with its public medians, gaps below P50, neighbours on a map; Arps/Duong decline fits with EUR and a bootstrap band, campaign Monte Carlo from the published curves; MCP Apps views in Claude Desktop with text fallback; `vma-mcp` installable with `uvx`; five more public datasets catalogued (reserves, prices, royalties, field production, concessions); a synthetic dataset for tests and demos. Your data never leaves your machine | **done** → [For operators](#for-operators-compare-your-wells-f5-2026-11-02), [`docs/mis-datos.md`](docs/mis-datos.md), [`docs/simulacion.md`](docs/simulacion.md), [`docs/mcp-apps.md`](docs/mcp-apps.md) |
+
+## For operators: compare your wells (F5, 2026-11-02)
+
+The same tools, now for people inside an operating company: point the agent at a CSV or Parquet with your own
+monthly production per well and ask how each well, each pad or each campaign compares with the Capítulo IV.
+**Your file never leaves your machine**: it is read into the in-memory database of the process you run, compared,
+and gone when the process ends; nothing is written, cached or uploaded (ADR-030). Bring your own key, as in F4.
+
+| tool | what it answers |
+|---|---|
+| `cargar_mis_pozos(ruta, mapeo?, ruta_pozos?)` | loads your file (schema and aliases in [docs/mis-datos.md](docs/mis-datos.md)), computes your indicators with the published rules |
+| `comparar_mi_pozo(sigla)` | your well month by month against the P10/P50/P90 of its cohort × formation × window, with an estimated percentile; your IP90, IP90/m and 12-month cumulative against the public group |
+| `comparar_mi_campania(filtros)` | each of your wells against the public median of its own group, and the campaign summary |
+| `brechas(sigla | filtros)` | where and how much you are below P50, by month and cumulated, in rate and in volume |
+| `vecinos_de_mis_pozos(radio_km)` | your wells among the public wells around them, with the metric on both sides |
+| `pronosticar_pozo(sigla, mio?)` | Arps / Duong decline fit, EUR to 20-30 years with a bootstrap band ([docs/simulacion.md](docs/simulacion.md)) |
+| `pronosticar_curva_tipo(nivel, claves)` | the same on a published type curve (works on a fresh clone) |
+| `simular_campania(formacion, n_pozos, …)` | Monte Carlo of a campaign sampled from a published type curve: P10/P50/P90 of rate and cumulative per month |
+
+In **Claude Desktop** (and other hosts that implement [MCP Apps](https://github.com/modelcontextprotocol/ext-apps))
+four of them also open a view in the chat: the type curve with your well on top, the map of your wells among the
+neighbours, the campaign ranking with your position, and a campaign simulator with controls
+([docs/mcp-apps.md](docs/mcp-apps.md)). Everywhere else the tools answer the same cited JSON.
+
+### Install
+
+```bash
+# from a clone (everything, including the pipeline)
+pip install -e ".[dev,agente]"
+# or as a package, no clone: the server downloads the public JSON snapshot once into ~/.vaca-muerta-abierta/
+uvx --from "git+https://github.com/LucasBurriel/vaca-muerta-abierta" vma-mcp
+pip install "vaca-muerta-abierta[mcp] @ git+https://github.com/LucasBurriel/vaca-muerta-abierta" && vma-mcp
+```
+
+`VMA_DATOS=/path/with/site/data` (or `--datos`) points the server at other data, for example the Parquet tables of
+a release. The MCP server needs only `mcp`; the CLI agent with Claude needs `anthropic` and `ANTHROPIC_API_KEY`.
+
+### Configure your client
+
+Claude Desktop (`claude_desktop_config.json`), renders the views:
+
+```json
+{"mcpServers": {"vaca-muerta-abierta": {"command": "uvx",
+  "args": ["--from", "git+https://github.com/LucasBurriel/vaca-muerta-abierta", "vma-mcp"]}}}
+```
+
+Claude Code (`.mcp.json` in your project, or `claude mcp add vaca-muerta-abierta -- uvx --from git+https://github.com/LucasBurriel/vaca-muerta-abierta vma-mcp`), text only:
+
+```json
+{"mcpServers": {"vaca-muerta-abierta": {"command": "uvx",
+  "args": ["--from", "git+https://github.com/LucasBurriel/vaca-muerta-abierta", "vma-mcp"]}}}
+```
+
+Cursor (`.cursor/mcp.json`), text only:
+
+```json
+{"mcpServers": {"vaca-muerta-abierta": {"command": "uvx",
+  "args": ["--from", "git+https://github.com/LucasBurriel/vaca-muerta-abierta", "vma-mcp"],
+  "env": {"VMA_DATOS": "C:/path/to/vaca-muerta-abierta"}}}}
+```
+
+From a clone, replace `uvx …` by `python C:/path/to/vaca-muerta-abierta/mcp_server.py` (add `--sin-apps` to drop
+the views, `--sql` for the opt-in SQL tool). Then, in the chat: *cargá mis pozos de C:/datos/mios.csv y compará mi
+pozo X-12 con su curva tipo*.
+
+### Try it without your data
+
+`python pipeline.py sintetico` derives a synthetic "my wells" dataset from public wells with noise; a 30-well copy is
+committed in `tests/fixtures/sintetico/` and used by the tests, by `python -m vma.apps.demo --servir` (a local host
+that renders the four views) and by the transcripts in [docs/ejemplos-agente.md](docs/ejemplos-agente.md).
+
+### Manual step for the owner: publish the tables as a release
+
+The full Parquet tables (`data/publicado/<date>/pozos.parquet`, `indicadores.parquet`, `curvas_tipo.parquet`, about
+20 MB) are not committed and the portal does not answer CI (ADR-024). To let users run the server on the full
+tables without downloading 460 MB from the portal: build them locally, then
+`gh release create datos-<date> data/publicado/<date>/*.parquet --title "Tablas publicadas <date>"` and document the
+release tag here; users unzip into any folder with a `data/publicado/<date>/` layout and point `VMA_DATOS` at it.
+Not done in F5 (ADR-033).
 
 ## Ask it questions (F4, 2026-11-01)
 
@@ -156,7 +236,7 @@ Full report: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md).
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 134 tests, no network, no data, no model needed
+python -m pytest -q            # 178 tests, no network, no data, no model needed
 
 python pipeline.py sources     # the catalogue (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<today>/ + manifest.json (URL, bytes, sha256, CKAN last_modified)
@@ -173,7 +253,11 @@ pip install -e ".[dev,agente]"  # F4: anthropic + mcp
 export ANTHROPIC_API_KEY=...    # without it the agent runs the model-free mock and says so
 python agente.py "¿Cómo es la curva tipo de Vaca Muerta 2022 en la ventana de petróleo?"
 python agente.py --chat        # multi-turn; --proveedor mock, --fuente json, --sql, --json
-python mcp_server.py           # MCP over stdio for Claude Desktop / Claude Code
+python mcp_server.py           # MCP over stdio for Claude Desktop / Claude Code (MCP Apps views; --sin-apps, --sql)
+
+python pipeline.py sintetico   # F5: a synthetic "my wells" dataset from public wells + noise -> data/sintetico/<today>/
+python -m vma.apps.demo --servir   # F5: a local host that renders the four MCP Apps views on the synthetic data
+vma-mcp                        # the server as an entry point (pip install -e . or uvx); data from the clone, VMA_DATOS or the cached snapshot
 ```
 
 Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib` (+ `anthropic`, `mcp` for the agent). Raw data is never committed; the manifest is what
@@ -187,7 +271,7 @@ run the pipeline where the portal is reachable and commit `site/data/`.
 ## Layout
 
 ```
-pipeline.py           sources | download | schema | quality | master | diff | indicadores | curvas | site
+pipeline.py           sources | download | schema | quality | master | diff | indicadores | curvas | site | sintetico
 vma/
   sources.py          catalogue of CKAN datasets/resources (ids, URLs, sizes, default vs opt-in)
   download.py         dated download with manifest; network isolated behind an injectable opener
@@ -204,25 +288,35 @@ vma/
   site.py             F3: pre-aggregated JSON for the site (pozos, curvas per level, resumen, meta with manifest hashes)
   consulta/           F4: datos.py (DuckDB views over Parquet or site JSON) · herramientas.py (the seven tools + opt-in SQL,
                       every result with its citation) · validador.py (no number without a tool result) · agente.py (loop, providers)
-agente.py             ask a question or chat; mcp_server.py  the same tools as an MCP server (stdio)
+  propios/            F5: the user's own wells: esquema.py (schema, aliases, validation) · cargar.py (indicators with the published rules,
+                      in-memory views) · comparar.py (well vs curve, campaign vs medians, gaps) · sintetico.py (public wells + noise)
+  simulacion/         F5: declinacion.py (Arps, Duong, EUR, bootstrap) · campania.py (Monte Carlo from a type curve) · series.py
+  apps/               F5: MCP Apps: four ui:// views (ui/*.html + puente.js + base.css), tool meta, resource CSP; demo.py (local test host)
+  consulta/ubicacion.py  F5: where the data is when installed as a package (clone, VMA_DATOS, cached public snapshot)
+agente.py             ask a question or chat; mcp_server.py  the same tools as an MCP server (stdio); entry points vma-agente, vma-mcp
 site/                 the static site: index · explorador · curvas · mapa · metodo (.html), js/, css/, data/ (generated, committed)
 .github/workflows/    tests.yml (every push, no data; runs the mock agent) · publish.yml (monthly + manual: download → tables → site → GitHub Pages)
 docs/
-  fuentes.md          every dataset: URL, licence, grain, size, last data, units as published
-  decisiones.md       ADRs 001-028: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+  fuentes.md          every dataset: URL, licence, grain, size, last data, units as published; the extended catalogue (F5)
+  decisiones.md       ADRs 001-033: name, scope, well key, units, raw-data policy, stack, capiv, lateral
                       precedence, master universe, alias policy, placeholder dates, publication format,
                       indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window,
                       site stack, site data (JSON vs Parquet in the browser), what the site cuts, publish cadence,
-                      F4 local agent + MCP without free SQL, Parquet/JSON double source, citation validator, model + mock
+                      F4 local agent + MCP without free SQL, Parquet/JSON double source, citation validator, model + mock,
+                      F5 extended catalogue, own data never persisted + synthetic, simulation declared as DCA, MCP Apps, packaging
   maestro.md          every column of the master with its rule, and every flag
   indicadores.md      every column of indicadores and curvas_tipo: formula, units, rule, flags
-  agente.md           F4: the tools, the envelope, the validator, providers, MCP config · ejemplos-agente.md  transcripts
+  agente.md           F4: the tools, the envelope, the validator, providers, MCP config · ejemplos-agente.md  transcripts (F4 and F5)
+  mis-datos.md        F5: your file's schema, mapping, validation, what is computed, the comparison tools, the synthetic dataset
+  simulacion.md       F5: decline models, fitting, EUR, bootstrap band, campaign Monte Carlo, assumptions and limits
+  mcp-apps.md         F5: the four views, how the extension is served from Python, configuration, how it was tested
   esquemas/           one markdown per dataset with its real columns
   calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report · sitio-*.png  screenshots of the site
 informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), indicadores-<date>.md (F2), diff-<a>-<b>.md
 alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (appended by the build); borradores/
 data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.* (git-ignored, rebuild or take the release)
-tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract, F4 tools on Parquet and JSON + validator + mock agent
+tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract, F4 tools on Parquet and JSON + validator + mock agent,
+                      F5 own data + synthetic fixture, decline fits and Monte Carlo, MCP Apps protocol on an in-memory client, packaging
 ```
 
 ## Rules this repository follows

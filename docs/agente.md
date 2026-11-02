@@ -119,6 +119,10 @@ python agente.py --proveedor mock --fuente json "ficha del pozo YPF.Nq.LACh-125(
 python agente.py --sql --json "..."     # opt-in SQL, transcript as JSON
 ```
 
+Installed as a package (`pip install -e .`, or `uvx --from git+https://github.com/LucasBurriel/vaca-muerta-abierta vma-mcp`)
+the entry points are `vma-agente`, `vma-mcp` and `vma-pipeline`; outside a clone the data root is `VMA_DATOS` or the
+site's JSON snapshot downloaded once into `~/.vaca-muerta-abierta/` (`vma/consulta/ubicacion.py`, ADR-033).
+
 ### MCP server (Claude Desktop, Claude Code, any MCP client)
 
 ```bash

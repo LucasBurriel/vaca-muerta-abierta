@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vaca-muerta-abierta"
-version = "0.0.1"
+version = "0.1.0"
 description = "Open observatory of Argentina's public per-well oil & gas data (Capitulo IV): downloaded, measured, cleaned, cross-referenced."
 readme = "README.md"
 license = { text = "MIT" }
@@ -15,7 +15,7 @@ dependencies = [
     "pandas>=2.0",
     "matplotlib>=3.8",
 ]
-keywords = ["oil-and-gas", "vaca-muerta", "open-data", "data-quality", "duckdb", "argentina"]
+keywords = ["oil-and-gas", "vaca-muerta", "open-data", "data-quality", "duckdb", "argentina", "mcp", "decline-curve"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
     "Intended Audience :: Science/Research",
@@ -26,10 +26,19 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+mcp = ["mcp>=1.2"]  # F5: the MCP server alone (vma-mcp); the tools need no model
 agente = ["anthropic>=0.75", "mcp>=1.2"]  # F4: the Claude provider and the MCP server; tools and tests need neither
+
+[project.scripts]
+vma-mcp = "mcp_server:main"
+vma-agente = "agente:main"
+vma-pipeline = "pipeline:main"
 
 [project.urls]
 Homepage = "https://github.com/LucasBurriel/vaca-muerta-abierta"
+
+[tool.setuptools]
+py-modules = ["mcp_server", "agente", "pipeline"]
 
 [tool.setuptools.packages.find]
 include = ["vma*"]

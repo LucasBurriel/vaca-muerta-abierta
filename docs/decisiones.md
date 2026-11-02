@@ -559,3 +559,24 @@ test pins; if the Python SDK gains first-class UI metadata, `instalar` shrinks t
 origins the views use, so a host that honours it loads charts and maps and nothing else; a host that does not allow
 external scripts shows the text fallback. Nothing of the user's leaves the machine through the views: they receive
 the tool result from the host and send back only `tools/call` arguments.
+
+## ADR-033 · Packaging: entry points `vma-mcp` / `vma-agente`, data resolved from the clone, an env var or a cached public snapshot; the Parquet tables as a GitHub release made by the owner (2026-11-02)
+
+**Context.** F5's users are people in operating companies who want the tools in Claude Desktop, Claude Code or
+Cursor without cloning a repository or running a pipeline. `pip install` / `uvx` of a package that ships only code
+leaves the question of where the data is; the full tables are not committed (ADR-014) and the portal does not
+answer CI runners (ADR-024).
+
+**Decision.** `pyproject.toml` declares the top-level scripts as modules and three entry points (`vma-mcp`,
+`vma-agente`, `vma-pipeline`), the views as package data and a `mcp` extra (server without the Anthropic SDK).
+`vma/consulta/ubicacion.py` resolves the data root in a fixed order: `--datos`, `VMA_DATOS`, the clone the scripts
+live in, the user cache `~/.vaca-muerta-abierta/`, and when none has data, it downloads the site's JSON snapshot
+(the files GitHub Pages serves, about 5 MB, public) into that cache once. So `uvx --from git+… vma-mcp` works on a
+machine with nothing else, with the JSON limits of ADR-023 declared in every result. The full Parquet tables remain
+the owner's call: the README documents, as a manual step, publishing `data/publicado/<date>/` as a GitHub release so
+users can point `VMA_DATOS` at it without the portal; this phase does not create the release.
+
+**Consequences.** Three ways to run, one code path: a clone (everything), a package with the cached snapshot (the
+site's subset), a package pointed at downloaded tables. The cache holds only public data; the user's own files stay
+where they are (ADR-030). The snapshot download is one more network dependency, isolated behind an injectable
+opener and tested without network, and it is skipped whenever any local data exists.

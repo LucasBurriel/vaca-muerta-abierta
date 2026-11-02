@@ -20,6 +20,7 @@ from pathlib import Path
 
 from vma.consulta import agente as A
 from vma.consulta import datos as D
+from vma.consulta import ubicacion as U
 
 ROOT = Path(__file__).resolve().parent
 
@@ -47,7 +48,12 @@ def main(argv: list[str] | None = None) -> int:
         "--esfuerzo", default=A.ESFUERZO_DEFAULT, choices=["low", "medium", "high", "xhigh", "max"]
     )
     ap.add_argument("--fuente", default="auto", choices=["auto", "parquet", "json"])
-    ap.add_argument("--datos", type=Path, default=ROOT, help="raíz del repo (data/publicado y site/data)")
+    ap.add_argument(
+        "--datos",
+        type=Path,
+        default=None,
+        help=f"raíz con site/data o data/publicado (default: el clon, ${U.ENV}, o el snapshot en {U.cache_dir()})",
+    )
     ap.add_argument(
         "--sql", action="store_true", help="exponer sql_solo_lectura (riesgo documentado, ADR-025)"
     )
@@ -63,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.pregunta and not args.chat:
         ap.error("falta la pregunta (o --chat)")
-    d = D.abrir(args.datos, args.fuente)
+    d = D.abrir(U.raiz_datos(args.datos, ROOT), args.fuente)
     proveedor = A.elegir_proveedor(args.proveedor, args.modelo, args.esfuerzo)
     if not args.json:
         print(

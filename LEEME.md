@@ -19,6 +19,72 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 | **F2 · Indicadores** | una fila por pozo: IP30/90/180 en días efectivos, acumulados a 6/12/24 meses, todo por metro de rama, GOR, corte de agua, ventana de fluido, flags y linaje; curvas tipo P10/P50/P90 por cohorte × formación (× ventana, × operadora) con `n_pozos`, publicadas con y sin outliers | **hecha** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
 | **F3 · Sitio** | explorador estático: tabla de pozos con celdas "sin dato porque…", curvas tipo P10/P50/P90 con `n`, mapa Leaflet, página de método; JSON pre-agregados por el pipeline, regenerado cada mes por CI y publicado en GitHub Pages | **hecha** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
 | **F4 · Preguntas en lenguaje natural** | agente local (`agente.py`, CLI y chat) y servidor MCP (`mcp_server.py`) sobre siete herramientas tipadas de solo lectura; cada resultado trae su cita (tabla, columnas, filtros, regla); un validador rechaza cualquier número que las herramientas no devolvieron; funciona con el snapshot JSON commiteado o con las tablas Parquet | **hecha** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
+| **F5 · Compará tus pozos** | módulo «mis datos»: cargás tu producción mensual (CSV/Parquet) en la sesión y comparás cada pozo con la curva tipo publicada de su cohorte × formación × ventana, cada campaña con sus medianas públicas, brechas contra el P50, vecinos en un mapa; ajustes de declinación Arps/Duong con EUR y banda bootstrap, Monte Carlo de campaña desde las curvas publicadas; vistas MCP Apps en Claude Desktop con texto de respaldo; `vma-mcp` instalable con `uvx`; cinco datasets públicos más catalogados (reservas, precios, regalías, producción por yacimiento, concesiones); un dataset sintético para tests y demos. Tus datos no salen de tu máquina | **hecha** → [Para operadoras](#para-operadoras-compará-tus-pozos-f5-02-11-2026), [`docs/mis-datos.md`](docs/mis-datos.md), [`docs/simulacion.md`](docs/simulacion.md), [`docs/mcp-apps.md`](docs/mcp-apps.md) |
+
+## Para operadoras: compará tus pozos (F5, 02-11-2026)
+
+Las mismas herramientas, ahora para gente dentro de una operadora: le apuntás al agente un CSV o Parquet con tu
+producción mensual por pozo y preguntás cómo se compara cada pozo, cada pad o cada campaña con el Capítulo IV. **Tu
+archivo no sale de tu máquina**: se lee en la base en memoria del proceso que corrés, se compara, y desaparece
+cuando el proceso termina; nada se escribe, cachea ni sube (ADR-030). Clave propia, como en F4.
+
+| herramienta | qué contesta |
+|---|---|
+| `cargar_mis_pozos(ruta, mapeo?, ruta_pozos?)` | carga tu archivo (esquema y alias en [docs/mis-datos.md](docs/mis-datos.md)) y computa tus indicadores con las reglas publicadas |
+| `comparar_mi_pozo(sigla)` | tu pozo mes a mes contra el P10/P50/P90 de su cohorte × formación × ventana, con percentil estimado; tu IP90, IP90/m y acumulado 12 meses contra el grupo público |
+| `comparar_mi_campania(filtros)` | cada pozo tuyo contra la mediana pública de su propio grupo, y el resumen de la campaña |
+| `brechas(sigla | filtros)` | dónde y cuánto estás por debajo del P50, por mes y acumulado, en tasa y en volumen |
+| `vecinos_de_mis_pozos(radio_km)` | tus pozos entre los pozos públicos que los rodean, con la métrica de los dos lados |
+| `pronosticar_pozo(sigla, mio?)` | ajuste de declinación Arps / Duong, EUR a 20-30 años con banda bootstrap ([docs/simulacion.md](docs/simulacion.md)) |
+| `pronosticar_curva_tipo(nivel, claves)` | lo mismo sobre una curva tipo publicada (funciona en un clon fresco) |
+| `simular_campania(formacion, n_pozos, …)` | Monte Carlo de una campaña muestreada de una curva tipo publicada: P10/P50/P90 de tasa y acumulado por mes |
+
+En **Claude Desktop** (y otros hosts que implementan [MCP Apps](https://github.com/modelcontextprotocol/ext-apps))
+cuatro de ellas abren además una vista en el chat: la curva tipo con tu pozo encima, el mapa de tus pozos entre los
+vecinos, el ranking de la campaña con tu posición, y un simulador de campaña con controles
+([docs/mcp-apps.md](docs/mcp-apps.md)). En el resto, las herramientas contestan el mismo JSON con cita.
+
+### Instalar
+
+```bash
+# desde un clon (todo, pipeline incluido)
+pip install -e ".[dev,agente]"
+# o como paquete, sin clon: el servidor baja una vez el snapshot JSON público a ~/.vaca-muerta-abierta/
+uvx --from "git+https://github.com/LucasBurriel/vaca-muerta-abierta" vma-mcp
+pip install "vaca-muerta-abierta[mcp] @ git+https://github.com/LucasBurriel/vaca-muerta-abierta" && vma-mcp
+```
+
+`VMA_DATOS=/ruta/con/site/data` (o `--datos`) apunta el servidor a otros datos, por ejemplo las tablas Parquet de
+un release. El servidor MCP sólo necesita `mcp`; el agente CLI con Claude necesita `anthropic` y `ANTHROPIC_API_KEY`.
+
+### Configurar el cliente
+
+Claude Desktop (`claude_desktop_config.json`), dibuja las vistas:
+
+```json
+{"mcpServers": {"vaca-muerta-abierta": {"command": "uvx",
+  "args": ["--from", "git+https://github.com/LucasBurriel/vaca-muerta-abierta", "vma-mcp"]}}}
+```
+
+Claude Code (`.mcp.json` del proyecto, o `claude mcp add vaca-muerta-abierta -- uvx --from git+https://github.com/LucasBurriel/vaca-muerta-abierta vma-mcp`) y Cursor (`.cursor/mcp.json`) usan el mismo bloque y muestran texto; con
+`"env": {"VMA_DATOS": "C:/ruta/al/clon"}` se apunta a un clon o a tablas descargadas. Desde un clon, reemplazá
+`uvx …` por `python C:/ruta/al/clon/mcp_server.py` (`--sin-apps` quita las vistas, `--sql` suma el SQL opt-in).
+Después, en el chat: *cargá mis pozos de C:/datos/mios.csv y compará mi pozo X-12 con su curva tipo*.
+
+### Probarlo sin tus datos
+
+`python pipeline.py sintetico` deriva un dataset «mis pozos» sintético de pozos públicos con ruido; una copia de 30
+pozos está commiteada en `tests/fixtures/sintetico/` y la usan los tests, `python -m vma.apps.demo --servir` (un host
+local que dibuja las cuatro vistas) y los transcripts de [docs/ejemplos-agente.md](docs/ejemplos-agente.md).
+
+### Paso manual del dueño: publicar las tablas como release
+
+Las tablas Parquet completas (`data/publicado/<fecha>/pozos.parquet`, `indicadores.parquet`, `curvas_tipo.parquet`,
+~20 MB) no se commitean y el portal no responde a CI (ADR-024). Para que un usuario corra el servidor sobre las
+tablas completas sin bajar 460 MB del portal: construirlas localmente y
+`gh release create datos-<fecha> data/publicado/<fecha>/*.parquet --title "Tablas publicadas <fecha>"`, y anotar acá
+el tag; el usuario descomprime en una carpeta con la forma `data/publicado/<fecha>/` y apunta `VMA_DATOS` ahí. No
+se hizo en F5 (ADR-033).
 
 ## Preguntarle a los datos (F4, 01-11-2026)
 
@@ -131,7 +197,7 @@ Informe completo: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 134 tests, sin red, sin datos, sin modelo
+python -m pytest -q            # 178 tests, sin red, sin datos, sin modelo
 
 python pipeline.py sources     # el catálogo (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<hoy>/ + manifest.json (URL, bytes, sha256, last_modified de CKAN)
@@ -148,7 +214,11 @@ pip install -e ".[dev,agente]"  # F4: anthropic + mcp
 export ANTHROPIC_API_KEY=...    # sin clave, el agente usa el proveedor mock (sin modelo) y lo avisa
 python agente.py "¿Cómo es la curva tipo de Vaca Muerta 2022 en la ventana de petróleo?"
 python agente.py --chat        # conversación; --proveedor mock, --fuente json, --sql, --json
-python mcp_server.py           # servidor MCP (stdio) para Claude Desktop / Claude Code
+python mcp_server.py           # servidor MCP (stdio) para Claude Desktop / Claude Code (vistas MCP Apps; --sin-apps, --sql)
+
+python pipeline.py sintetico   # F5: dataset «mis pozos» sintético desde pozos públicos + ruido -> data/sintetico/<hoy>/
+python -m vma.apps.demo --servir   # F5: host local que dibuja las cuatro vistas MCP Apps con el sintético
+vma-mcp                        # el servidor como entry point (pip install -e . o uvx); datos del clon, VMA_DATOS o el snapshot cacheado
 ```
 
 Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib` (+ `anthropic`, `mcp` para el agente). Los datos crudos nunca se versionan; el manifiesto

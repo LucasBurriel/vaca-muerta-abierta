@@ -110,3 +110,76 @@ A second, unplanned catch while writing this document: an earlier mock computed 
 "31 columnas"; the validator flagged `31` because no tool had returned it. The fix was in the tool, not in the
 validator: `describir_tabla` now returns `n_columnas`. That is the intended division of labour: tools compute, the
 model quotes.
+
+
+# F5 · Comparar mis pozos (datos sintéticos)
+
+Four questions run on 2026-11-02 against the same Parquet tables with `python agente.py --proveedor mock`, after
+loading the **synthetic** "my wells" dataset committed in `tests/fixtures/sintetico/` (30 wells derived from public
+Vaca Muerta wells with noise and new siglas, `python pipeline.py sintetico`; ADR-030). They are not anyone's wells:
+every result says `DATOS SINTÉTICOS`. The mock plans from keywords (a path ending in `.csv`/`.parquet` loads it;
+`MIO-nnn` names a well; "campaña PAD-x", "brecha", "pronóstico", "simulá … pozos" pick the tool) and writes only from
+the tool results. With a key, Claude does the understanding; the tools, citations and numbers are the same.
+
+## Cargá mis pozos de … y decime cómo está mi campaña PAD-B contra su grupo público
+
+```
+-> cargar_mis_pozos({"ruta": "tests/fixtures/sintetico/mis_pozos_produccion.csv", "ruta_pozos": "tests/fixtures/sintetico/mis_pozos_atributos.csv"})
+-> comparar_mi_campania({"filtros": {"campania": "PAD-B"}})
+
+(respuesta del proveedor mock: sin modelo, armada sólo con los resultados de las herramientas)
+- Mis pozos cargados: 30 pozos, 1097 filas pozo-mes, período ['2022-05', '2026-09'], cohortes {'2022': 8, '2023': 8, '2024': 14} — DATOS SINTÉTICOS [mis_produccion + mis_pozos (sesión): sigla, fecha, petroleo_m3, gas_mil_m3; ruta = tests/fixtures/sintetico/mis_pozos_produccion.csv, ruta_pozos = tests/fixtures/sintetico/mis_pozos_atributos.csv]
+- Mi campaña (ip90_petroleo_m3_d_por_m, filtros {'campania': 'PAD-B'}): 10 de 10 pozos comparados; mediana mía 0.05199 vs mediana de medianas públicas 0.05168; 5 pozos sobre la mediana pública; supera % mediano 54.27 [mis_indicadores (sesión) × indicadores: ip90_petroleo_m3_d_por_m, cohorte, formacion, ventana; filtros = {'campania': 'PAD-B'}, metrica = ip90_petroleo_m3_d_por_m, incluye_outliers = True]
+  · MIO-029 (cohorte_formacion_ventana:2022/Vaca Muerta/petroleo): mío 0.1018, mediana pública 0.05278, supera 98.22 %
+  · MIO-026 (cohorte_formacion_ventana:2023/Vaca Muerta/petroleo): mío 0.07239, mediana pública 0.05169, supera 87.91 %
+  · MIO-017 (cohorte_formacion_ventana:2024/Vaca Muerta/petroleo): mío 0.06956, mediana pública 0.05166, supera 84.83 %
+  · MIO-008 (cohorte_formacion_ventana:2024/Vaca Muerta/petroleo): mío 0.06015, mediana pública 0.05166, supera 70.62 %
+  Nota: las tasas (ip*, curvas tipo) son por día efectivo de producción (tef), no por día calendario (ADR-016); los acumulados (acum*) son por meses calendario desde el mes 0
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+Validador: ok · turnos 2, reintentos 0. Each well is compared with the public median of *its own* cohort × formation
+× window (the campaign mixes 2022, 2023 and 2024 wells), which is why the ranking view (MCP App) draws one bar per
+well with its group named.
+
+## Cargá mis pozos de …: ¿dónde está la brecha de mi pozo MIO-011 contra el P50?
+
+```
+-> cargar_mis_pozos({...})
+-> brechas({"mes_max": 12, "sigla": "MIO-011"})
+
+- Brechas contra P50 (petroleo_m3_d, hasta el mes 12): acumulado mío 25160.0 m³ vs 41340.0 a P50, brecha -16180.0 (-39.13 %); 1 de 1 pozos por debajo [mis_produccion (sesión) × curvas_tipo: mes, tef_d, petroleo_m3_d, petroleo_m3_d_p50; sigla = MIO-011, filtros = {}, tasa = petroleo_m3_d, incluye_outliers = True, mes_max = 12]
+  · MIO-011: 12 de 13 meses debajo de P50 (0-5: 5, 6-11: 6, 12+: 1), brecha acumulada -16180.0 (-39.13 %), peor mes 0
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+Validador: ok · turnos 2, reintentos 0. The gap is "what the P50 would have produced on my producing days", not a
+loss: the note in the full envelope says so, and the months below are split by stretch (0-5, 6-11, 12+) so an
+engineer sees whether the well started weak or faded.
+
+## Cargá mis pozos de … y hacé el pronóstico de EUR de mi pozo MIO-002
+
+```
+-> cargar_mis_pozos({...})
+-> pronosticar_pozo({"sigla": "MIO-002", "mio": true, "n_bootstrap": 100})
+
+- Pronóstico de MIO-002 (petroleo_m3_d): modelo exponencial {'qi': 287.9, 'D': 0.05882}, 43 meses ajustados, EUR a 240 meses 138200.0 m³ (histórico 128500.0, restante 9702.0); banda bootstrap P90 136000.0 / P50 138400.0 / P10 141800.0 (100 réplicas) [mis_produccion (sesión): mes, tef_d, petroleo_m3; sigla = MIO-002, mio = True, tasa = petroleo_m3_d, modelo = auto, horizonte_anios = 20, omitir_meses = 2, n_bootstrap = 100, d_min_anual = 0.06, uptime = 0.8577]
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+Validador: ok · turnos 2, reintentos 0. The AIC chose the exponential over hyperbolic, harmonic and Duong for this
+(synthetic) 2022 well; the full envelope carries the four fits, the yearly cumulatives and the note that this is
+decline-curve analysis, not reservoir simulation (ADR-031).
+
+## Simulá una campaña de 12 pozos en Vaca Muerta, ventana de petróleo, cohorte 2022, con rama de 2800 m
+
+```
+-> simular_campania({"formacion": "Vaca Muerta", "n_pozos": 12, "meses": 120, "n_sim": 300, "ventana": "petroleo", "cohorte_ref": 2022, "rama_m": 2800.0})
+
+- Campaña simulada de 12 pozos (Vaca Muerta 2022, petroleo, 300 corridas): acumulado a 120 meses P90 1154000.0 / P50 1365000.0 / P10 1581000.0 m³; por pozo P50 113800.0; tasa pico P50 2215.0 en el mes 3 [curvas_tipo: mes, petroleo_m3_d_por_m_p10, petroleo_m3_d_por_m_p50, petroleo_m3_d_por_m_p90; formacion = Vaca Muerta, cohorte_ref = 2022, ventana = petroleo, n_pozos = 12, meses = 120, rama_m = 2800.0, tasa = petroleo_m3_d, n_sim = 300, semilla = 0, uptime = 0.92, incluye_outliers = True]
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+Validador: ok · turnos 2, reintentos 0. Public data only (no "my wells" here): the per-metre curve of the 2022 oil
+window scaled by a 2,800 m lateral, 12 wells starting together, the band being the published dispersion between
+wells and nothing else (`docs/simulacion.md`). In Claude Desktop the same call opens the simulator view with sliders.
