@@ -85,8 +85,10 @@ Las tablas Parquet completas (`data/publicado/<fecha>/pozos.parquet`, `indicador
 ~20 MB) no se commitean y el portal no responde a CI (ADR-024). Para que un usuario corra el servidor sobre las
 tablas completas sin bajar 460 MB del portal: construirlas localmente y
 `gh release create datos-<fecha> data/publicado/<fecha>/*.parquet --title "Tablas publicadas <fecha>"`, y anotar acá
-el tag; el usuario descomprime en una carpeta con la forma `data/publicado/<fecha>/` y apunta `VMA_DATOS` ahí. No
-se hizo en F5 (ADR-033).
+el tag; el usuario descomprime en una carpeta con la forma `data/publicado/<fecha>/` y apunta `VMA_DATOS` ahí.
+
+Publicado: [`datos-2026-10-31`](https://github.com/LucasBurriel/vaca-muerta-abierta/releases/tag/datos-2026-10-31) (las tres tablas Parquet, ~7 MB, con SHA-256 en las notas).
+Bajarlas a `data/publicado/2026-10-31/` y el servidor las toma sin `--fuente json`.
 
 ## Preguntarle a los datos (F4, 01-11-2026)
 

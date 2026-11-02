@@ -100,7 +100,9 @@ The full Parquet tables (`data/publicado/<date>/pozos.parquet`, `indicadores.par
 tables without downloading 460 MB from the portal: build them locally, then
 `gh release create datos-<date> data/publicado/<date>/*.parquet --title "Tablas publicadas <date>"` and document the
 release tag here; users unzip into any folder with a `data/publicado/<date>/` layout and point `VMA_DATOS` at it.
-Not done in F5 (ADR-033).
+
+Published: [`datos-2026-10-31`](https://github.com/LucasBurriel/vaca-muerta-abierta/releases/tag/datos-2026-10-31) (the three Parquet tables, about 7 MB, with SHA-256 in the notes).
+Download them into `data/publicado/2026-10-31/` and the server picks them up without `--fuente json`.
 
 ## Ask it questions (F4, 2026-11-01)
 
