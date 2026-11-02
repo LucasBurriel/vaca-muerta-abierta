@@ -74,7 +74,16 @@ Con el paquete instalado (`pip install -e ".[agente]"` o `uvx`), `vma-mcp` reemp
 
    ![curva tipo renderizada como MCP App en Claude Desktop](mcp-app-curva-tipo-claude-desktop.png)
 
-   Las otras tres vistas (mapa de vecinos, ranking, simulador) todavía no se probaron en un host real.
+   En la misma sesión también dibujó la comparación de cohortes (botón «Comparar con 2021 y 2023»), el ranking
+   de campañas y el simulador con sus controles:
+
+   ![comparación de cohortes](mcp-app-comparar-cohortes-claude-desktop.png)
+   ![ranking](mcp-app-ranking-claude-desktop.png)
+   ![simulador](mcp-app-simulador-claude-desktop.png)
+
+   Lo que falló: el modelo no supo cargar el sintético porque pidió una carpeta y la herramienta exigía el
+   archivo (y el host no deja listar el repo). Desde entonces `cargar_mis_pozos` acepta carpeta y el alias
+   `sintetico` (`docs/mis-datos.md`). El mapa de vecinos sigue sin probarse en un host real.
 
 ## Límites
 

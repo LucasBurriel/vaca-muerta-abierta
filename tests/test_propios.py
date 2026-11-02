@@ -408,3 +408,19 @@ def test_tools_are_in_the_registry_and_documented():
     for n in nombres:
         assert f"`{n}(" in doc
     assert "never leaves the machine" in doc or "no salen de la máquina" in doc
+
+
+def test_resolver_ruta_alias_carpeta_y_relativa(tmp_path):
+    from vma.propios import cargar as C
+
+    prod, attrs = C.resolver_ruta("sintetico")
+    assert prod.name == "mis_pozos_produccion.csv" and attrs.name == "mis_pozos_atributos.csv"
+    rel = C.resolver_ruta("tests/fixtures/sintetico")
+    assert [x.resolve() for x in rel] == [prod.resolve(), attrs.resolve()]
+    assert C.resolver_ruta(prod.parent, ruta_pozos=tmp_path / "x.csv") == (prod, tmp_path / "x.csv")
+    mis = C.cargar("demo")
+    assert mis.meta["n_pozos"] == 30 and mis.meta["sintetico"]
+    (tmp_path / "a.csv").write_text("sigla\n", encoding="utf-8")
+    (tmp_path / "b.csv").write_text("sigla\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="varios archivos"):
+        C.resolver_ruta(tmp_path)

@@ -66,6 +66,12 @@ citation envelope as the rest (`cita.tabla` names the session views, `regla_doc`
 
 ### `cargar_mis_pozos(ruta, mapeo?, ruta_pozos?)`
 
+`ruta` can be a file, a folder (the `*produccion*` file inside it, plus `*atributos*`/`*pozos*` as `ruta_pozos`
+if present) or the alias `sintetico` (the bundled fixture, else the latest `data/sintetico/<date>/`). A relative
+path that does not exist from the working directory is retried against the repo root, because MCP hosts start the
+server from anywhere. Added after the first Claude Desktop test (2026-11-02), where the model could not guess the
+file name inside `tests/fixtures/sintetico/`.
+
 Reads, validates, computes, registers `mis_produccion`, `mis_pozos`, `mis_indicadores` on the session connection
 (replacing a previous load) and returns the load summary: wells, rows, period, mapping applied, wells per cohort
 and per window, the warnings, and one row per well with its main indicators and flags. If the file is the

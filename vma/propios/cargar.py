@@ -340,13 +340,62 @@ def indicadores_propios(g: pd.DataFrame, pozos: pd.DataFrame) -> pd.DataFrame:
 # --- the public entry points ------------------------------------------------------------------------------------
 
 
+ALIAS_SINTETICO = ("sintetico", "sintético", "demo")
+_RAIZ_REPO = Path(__file__).resolve().parents[2]
+
+
+def _elegir_en_carpeta(carpeta: Path) -> tuple[Path, Path | None]:
+    """The production file (and the per-well attributes file, if any) inside a folder."""
+    datos = sorted(
+        p for p in carpeta.iterdir() if p.suffix.lower() in (".csv", ".parquet", ".pq", ".tsv", ".txt")
+    )
+    if not datos:
+        raise FileNotFoundError(f"{carpeta} no tiene ningún .csv ni .parquet")
+    prod = [p for p in datos if "produccion" in p.name.lower()] or [
+        p for p in datos if not any(k in p.name.lower() for k in ("atributo", "pozos"))
+    ]
+    if len(prod) != 1:
+        raise ValueError(
+            f"{carpeta} tiene varios archivos de datos ({', '.join(p.name for p in datos)}): "
+            "pasá la ruta del archivo de producción (y ruta_pozos si hay atributos aparte)"
+        )
+    attrs = [p for p in datos if p != prod[0] and any(k in p.name.lower() for k in ("atributo", "pozos"))]
+    return prod[0], (attrs[0] if len(attrs) == 1 else None)
+
+
+def resolver_ruta(ruta: Path | str, ruta_pozos: Path | str | None = None) -> tuple[Path, Path | None]:
+    """Turn what a user (or a model) typed into the files to read.
+
+    Accepts the alias ``sintetico`` (the bundled fixture, else the latest ``data/sintetico/<date>/``), a folder
+    (picks ``*produccion*`` and ``*atributos*``/``*pozos*`` inside it), or a file; relative paths that do not
+    exist from the working directory are retried against the repo root, since MCP hosts start the server anywhere.
+    """
+    texto = str(ruta).strip()
+    if texto.lower() in ALIAS_SINTETICO:
+        cands = [_RAIZ_REPO / "tests" / "fixtures" / "sintetico"]
+        gen = _RAIZ_REPO / "data" / "sintetico"
+        if gen.is_dir():
+            cands += sorted((p for p in gen.iterdir() if p.is_dir()), reverse=True)
+        for c in cands:
+            if c.is_dir():
+                return _elegir_en_carpeta(c)
+        raise FileNotFoundError("no hay dataset sintético: generalo con `vma-pipeline sintetico` (ADR-030)")
+    p = Path(texto).expanduser()
+    if not p.exists() and not p.is_absolute() and (_RAIZ_REPO / p).exists():
+        p = _RAIZ_REPO / p
+    if p.is_dir():
+        prod, attrs = _elegir_en_carpeta(p)
+        return prod, (Path(ruta_pozos) if ruta_pozos else attrs)
+    return p, (Path(ruta_pozos) if ruta_pozos else None)
+
+
 def cargar(
     ruta: Path | str,
     mapeo: dict[str, str] | None = None,
     ruta_pozos: Path | str | None = None,
 ) -> MisPozos:
     """Read, validate, normalise and compute. Raises ``ValueError`` with a readable message on a bad file."""
-    ruta = Path(ruta)
+    ruta, ruta_pozos = resolver_ruta(ruta, ruta_pozos)
     crudo = leer_archivo(ruta)
     pozos_crudo = leer_archivo(Path(ruta_pozos)) if ruta_pozos else None
     return desde_frames(crudo, mapeo, pozos_crudo, meta={"ruta": str(ruta), **leer_meta_lateral(ruta)})

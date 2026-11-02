@@ -727,7 +727,9 @@ def _notas_propios(mis: P.MisPozos) -> list[str]:
 
 
 def cargar_mis_pozos(d: Datos, ruta: str, mapeo: dict | None = None, ruta_pozos: str | None = None) -> dict:
-    """Carga en la sesión un CSV o Parquet propio con producción mensual por pozo (sigla, fecha o anio+mes,
+    """Carga en la sesión un CSV o Parquet propio con producción mensual por pozo. ruta = archivo, carpeta (toma
+    el *produccion* y el *atributos* que haya adentro) o el alias "sintetico" (dataset de demo de 30 pozos).
+    Columnas (sigla, fecha o anio+mes,
     petroleo_m3, gas_mil_m3; opcionales agua_m3, tef, rama_m, etapas, arena_tn, agua_fractura_m3, formacion,
     longitud, latitud, campania, ventana) y, si hace falta, un segundo archivo con los atributos por pozo.
     mapeo = {columna_canonica: columna_del_archivo} cuando los nombres no coinciden con los alias. Computa los
