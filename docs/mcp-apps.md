@@ -83,7 +83,11 @@ Con el paquete instalado (`pip install -e ".[agente]"` o `uvx`), `vma-mcp` reemp
 
    Lo que falló: el modelo no supo cargar el sintético porque pidió una carpeta y la herramienta exigía el
    archivo (y el host no deja listar el repo). Desde entonces `cargar_mis_pozos` acepta carpeta y el alias
-   `sintetico` (`docs/mis-datos.md`). El mapa de vecinos sigue sin probarse en un host real.
+   `sintetico` (`docs/mis-datos.md`). Con eso, tras reiniciar el host, el mapa de vecinos también dibujó: radios
+   de 10 km alrededor de los 30 pozos sintéticos, los públicos que comparten locación, el resumen (mediana propia
+   contra la de los vecinos) y la grilla de pozos para elegir uno. Las cuatro vistas están verificadas en un host real.
+
+   ![mapa de vecinos](mcp-app-mapa-vecinos-claude-desktop.png)
 
 ## Límites
 
