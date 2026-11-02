@@ -44,6 +44,8 @@ cuatro de ellas abren además una vista en el chat: la curva tipo con tu pozo en
 vecinos, el ranking de la campaña con tu posición, y un simulador de campaña con controles
 ([docs/mcp-apps.md](docs/mcp-apps.md)). En el resto, las herramientas contestan el mismo JSON con cita.
 
+![curva tipo como MCP App en Claude Desktop](docs/mcp-app-curva-tipo-claude-desktop.png)
+
 ### Instalar
 
 ```bash

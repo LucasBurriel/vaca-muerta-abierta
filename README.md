@@ -44,6 +44,8 @@ four of them also open a view in the chat: the type curve with your well on top,
 neighbours, the campaign ranking with your position, and a campaign simulator with controls
 ([docs/mcp-apps.md](docs/mcp-apps.md)). Everywhere else the tools answer the same cited JSON.
 
+![type curve as an MCP App in Claude Desktop](docs/mcp-app-curva-tipo-claude-desktop.png)
+
 ### Install
 
 ```bash

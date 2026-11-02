@@ -67,8 +67,14 @@ Con el paquete instalado (`pip install -e ".[agente]"` o `uvx`), `vma-mcp` reemp
 3. **MCP Inspector**: no se corrió en esta sesión (requiere ejecutar un paquete npm externo, que el entorno de
    trabajo no permitió). Para probarlo: `npx @modelcontextprotocol/inspector python mcp_server.py` y mirar
    `tools/list` (`_meta`), `resources/read` (`_meta.ui.csp`).
-4. **Claude Desktop**: pendiente del dueño del repo (necesita la app y una clave propia). Lo esperado: al pedir
-   «compará mi pozo MIO-003» con el servidor conectado y el sintético cargado, aparece la curva con el pozo encima.
+4. **Claude Desktop** (2026-11-02, app de escritorio en Windows, servidor local por `vma-mcp --fuente json`):
+   al pedir la curva tipo de Vaca Muerta 2022 en petróleo «con la vista interactiva», el host dibujó la vista
+   dentro del chat: bandas P10/P50/P90, conmutadores m³/d–bbl/d y lineal–log, pozos por mes con la cola
+   decreciente marcada, slider de mes con los cuatro indicadores y los botones de acción.
+
+   ![curva tipo renderizada como MCP App en Claude Desktop](mcp-app-curva-tipo-claude-desktop.png)
+
+   Las otras tres vistas (mapa de vecinos, ranking, simulador) todavía no se probaron en un host real.
 
 ## Límites
 
