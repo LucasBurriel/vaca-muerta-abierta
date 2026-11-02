@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mis pozos entre los vecinos</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" integrity="sha512-h9FcoyWjHcOcmEVkxOfTLnmZFWIH0iZhZT1H2TbOq55xssQGEJHEaIm+PgoUaZbRvQTNTluNOEfb1ZRy6D3BOw==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<!--BASE_CSS-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" integrity="sha512-puJW3E/qXDqYp9IfhAI54BJEaWIfloJ7JWs7OeD5i6ruC9JZL1gERT1wjtwXFlh7CjE7ZJ+/vcRZRkIYIb6p4g==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!--PUENTE-->
+<style>
+.leyenda { font-size: 11px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+.leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.leaflet-container { background: light-dark(#eef0ea, #23252b); font: inherit; }
+.leaflet-popup-content { font: 12px/1.35 var(--sans); }
+</style>
+</head>
+<body>
+<h1 id="titulo">Mis pozos entre los vecinos <span id="sint" class="sintetico" hidden>sintético</span></h1>
+<p class="sub" id="sub">Esperando el resultado de <code>vecinos_de_mis_pozos</code>…</p>
+<div class="fila" id="tarjetas"></div>
+<div id="mapa" class="mapa"></div>
+<div class="leyenda"><span><i style="background:#1f6fb2"></i>míos</span><span><i style="background:#b5451b"></i>vecinos públicos (tamaño ∝ IP90 por m, gris sin dato)</span></div>
+<div id="tabla"></div>
+<p class="nota">Vecinos: pozos públicos en alcance a menos del radio de alguno de mis pozos, con sus coordenadas publicadas (Capítulo IV, superficie; no son las coordenadas de la rama). Mapa © OpenStreetMap.</p>
+<div class="cita" id="cita"></div>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let mapa = null, capa = null;
+  function tarjeta(k, v, mio) { return `<div class="tarjeta"><div class="k">${k}</div><div class="v${mio ? " mio" : ""}">${v}</div></div>`; }
+  function render(env) {
+    if (!env || env.error) { $("sub").textContent = "Error: " + ((env && env.error) || "sin datos"); return; }
+    const d = env.datos;
+    $("sint").hidden = !(env.notas || []).some((n) => n.includes("SINT"));
+    $("sub").innerHTML = `${d.n_mios} pozos míos con coordenadas · ${d.n_vecinos} vecinos públicos a menos de ${d.radio_km} km · métrica <code>${d.metrica}</code>`;
+    const r = d.resumen || {};
+    $("tarjetas").innerHTML = tarjeta("mediana mía", VMA.fmt(r.mediana_mia, 3), true) + tarjeta("mediana vecinos", VMA.fmt(r.mediana_vecinos, 3)) + tarjeta("mío / vecinos", VMA.fmt(r.ratio, 3), true) + tarjeta("operadoras vecinas", (r.operadoras || []).length);
+    if (!mapa) {
+      mapa = L.map("mapa", { zoomControl: true, attributionControl: true });
+      L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 17, attribution: "© OpenStreetMap contributors" }).addTo(mapa);
+    }
+    if (capa) capa.remove();
+    capa = L.layerGroup().addTo(mapa);
+    const pts = [];
+    const vals = d.vecinos.map((v) => v.valor).filter((x) => x !== null && x !== undefined);
+    const vmax = vals.length ? Math.max(...vals) : 1;
+    d.vecinos.forEach((v) => {
+      const rad = v.valor === null || v.valor === undefined ? 3 : 3 + 9 * Math.sqrt(v.valor / vmax);
+      L.circleMarker([v.latitud, v.longitud], { radius: rad, color: v.valor == null ? "#888" : "#b5451b", weight: 1, fillOpacity: 0.55 })
+        .bindPopup(`<b>${v.sigla}</b><br>${v.operadora || ""}<br>${v.formacion || ""} · cohorte ${v.cohorte ?? "–"} · ${v.ventana || "–"}<br>${d.metrica}: ${VMA.fmt(v.valor, 3)}<br>rama ${VMA.fmt(v.rama_m)} m · a ${VMA.fmt(v.distancia_km, 2)} km de ${v.mio_mas_cercano}`)
+        .addTo(capa);
+      pts.push([v.latitud, v.longitud]);
+    });
+    d.mios.forEach((m) => {
+      L.circleMarker([m.latitud, m.longitud], { radius: 7, color: "#1f6fb2", weight: 2, fillColor: "#1f6fb2", fillOpacity: 0.9 })
+        .bindPopup(`<b>${m.sigla}</b> (mío)<br>${m.campania || ""} · cohorte ${m.cohorte ?? "–"} · ${m.ventana || "–"}<br>${d.metrica}: ${VMA.fmt(m.valor, 3)}<br>rama ${VMA.fmt(m.rama_m)} m · ${m.n_vecinos} vecinos`)
+        .addTo(capa);
+      pts.push([m.latitud, m.longitud]);
+    });
+    if (pts.length) mapa.fitBounds(pts, { padding: [20, 20] });
+    setTimeout(() => mapa.invalidateSize(), 50);
+    const filas = d.mios.slice(0, 50);
+    $("tabla").innerHTML = `<table><thead><tr><th>mío</th><th>campaña</th><th>${d.metrica}</th><th>mediana vecinos</th><th>mío / vecinos</th><th>vecinos</th><th>más cercano</th></tr></thead><tbody>` +
+      filas.map((m) => `<tr class="mio"><td>${m.sigla}</td><td>${m.campania || "–"}</td><td>${VMA.fmt(m.valor, 3)}</td><td>${VMA.fmt(m.mediana_vecinos, 3)}</td><td>${VMA.fmt(m.ratio_vecinos, 3)}</td><td>${m.n_vecinos}</td><td>${m.vecino_mas_cercano || "–"} (${VMA.fmt(m.distancia_min_km, 2)} km)</td></tr>`).join("") + `</tbody></table>`;
+    const c = env.cita || {};
+    $("cita").innerHTML = `Cita: <code>${c.tabla}</code> · filtros ${JSON.stringify(c.filtros)} · ${c.regla_doc} · datos ${env.fecha_datos}, maestro ${env.version_maestro}, fuente ${env.fuente}`;
+  }
+  VMA.onResult = (res) => render(VMA.parse(res));
+  VMA.start();
+  if (!VMA.enHost) $("sub").textContent = "Abierto fuera de un host MCP: no hay resultado que mostrar.";
+})();
+</script>
+</body>
+</html>

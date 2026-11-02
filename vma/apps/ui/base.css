@@ -1,0 +1,46 @@
+/* Shared look of the ui://vaca-muerta/ views; host variables (--color-*) win over the fallbacks (ADR-032). */
+:root {
+  --bg: var(--color-background-primary, light-dark(#fbfaf7, #15161a));
+  --fg: var(--color-text-primary, light-dark(#1d1d1b, #e8e6df));
+  --muted: var(--color-text-secondary, light-dark(#6b6b66, #9a9890));
+  --line: var(--color-border-primary, light-dark(#e2e0d8, #2e3038));
+  --card: var(--color-background-secondary, light-dark(#ffffff, #1d1f25));
+  --accent: #b5451b;
+  --mio: #1f6fb2;
+  --ok: #2f7a4a;
+  --warn: #a86b00;
+  --radius: var(--border-radius-md, 8px);
+  --sans: var(--font-sans, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif);
+  --mono: var(--font-mono, ui-monospace, Menlo, Consolas, monospace);
+  color-scheme: light dark;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.4 var(--sans); padding: 12px 16px; }
+h1 { font-size: 16px; margin: 0 0 4px; font-weight: 600; }
+.sub { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+.fila { display: flex; gap: 12px; flex-wrap: wrap; align-items: stretch; }
+.tarjeta { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; min-width: 120px; flex: 1 1 120px; }
+.tarjeta .k { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+.tarjeta .v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tarjeta .v.mio { color: var(--mio); }
+.grafico { width: 100%; height: 320px; margin: 10px 0; }
+.mapa { width: 100%; height: 380px; margin: 10px 0; border-radius: var(--radius); border: 1px solid var(--line); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--muted); font-weight: 500; font-size: 11px; text-transform: uppercase; }
+tr.mio td { color: var(--mio); font-weight: 600; }
+.nota { color: var(--muted); font-size: 11px; margin-top: 8px; }
+.nota code, .cita code { font-family: var(--mono); font-size: 11px; }
+.cita { font-size: 11px; color: var(--muted); border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 6px; }
+.aviso { background: light-dark(#fff6e5, #3a2f16); border: 1px solid var(--warn); color: var(--fg); border-radius: var(--radius); padding: 8px 10px; font-size: 12px; margin: 8px 0; }
+.sintetico { display: inline-block; background: var(--warn); color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-left: 6px; vertical-align: middle; }
+.vacio { color: var(--muted); padding: 24px; text-align: center; border: 1px dashed var(--line); border-radius: var(--radius); }
+label { font-size: 12px; color: var(--muted); display: block; }
+input[type="number"], select { font: inherit; color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; width: 100%; }
+button { font: inherit; background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+button:disabled { opacity: 0.5; cursor: wait; }
+.controles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; align-items: end; margin: 8px 0; }

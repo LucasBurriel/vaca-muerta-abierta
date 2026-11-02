@@ -529,3 +529,33 @@ number cited to its curve and its parameters; an engineer can read the assumptio
 Parquet source plus the raw download, so a fresh clone gets the type-curve variant and a message, not a guess. The
 grid fits are coarser than a proper optimiser near the optimum and the i.i.d. bootstrap understates the band
 under autocorrelation; both are written down as limits rather than hidden.
+
+## ADR-032 · MCP Apps on the Python server: FastMCP for tools, a wrapped `resources/read` for the UI metadata, self-contained HTML with pinned CDNs, text fallback always (2026-11-02)
+
+**Context.** The product direction for F5 is tools consumed from the terminals and chat clients of technical people
+in operating companies, and, where the host allows it, the observatory's own visuals inside the chat. The MCP Apps
+extension (`io.modelcontextprotocol/ui`, stable 2026-01-26) does exactly that with `ui://` resources rendered in an
+iframe; its reference SDK is TypeScript and the Python `mcp` package knows nothing of it: `FastMCP.tool` takes
+`meta` but `resources/read` has no place for the resource-level `_meta.ui` that carries the CSP.
+
+**Decision.** Stay in Python (ADR-006, ADR-025): the four tools with a view declare `_meta.ui.resourceUri` and
+`visibility: ["model", "app"]` through FastMCP; the four resources are registered with FastMCP under
+`ui://vaca-muerta/` and MIME `text/html;profile=mcp-app`; `vma/apps/instalar` wraps the low-level
+`ReadResourceRequest` handler and adds `_meta.ui` (CSP with only `cdnjs.cloudflare.com`, plus OpenStreetMap tiles
+for the map; no `connectDomains`; `prefersBorder`) to the `ui://` contents. No TypeScript server, no second process.
+The views are self-contained HTML5 documents (CSS and the postMessage bridge inlined; ECharts 5.5.0 and Leaflet
+1.9.4 from cdnjs with the same pinned versions and integrity hashes as the site, ADR-021) that speak the `ui/*`
+methods directly: `ui/initialize`, `initialized`, `tool-input`, `tool-result`, `size-changed`, `host-context-changed`,
+`resource-teardown`, and `tools/call` for the simulator's controls. Every tool keeps returning text (the spec
+requires it and ADR-025 already did), so Claude Code, the CLI agent and any host without the extension see the
+cited JSON as before; `--sin-apps` removes the metadata entirely. Verification: protocol-level tests with an
+in-memory client session against the real server, and a local test host (`python -m vma.apps.demo`) that plays
+the host side with real tool results on the synthetic dataset; MCP Inspector and Claude Desktop are documented as
+the owner's manual checks.
+
+**Consequences.** One server, one registry, one envelope: the view is a rendering of the same cited result the
+model reads. The cost is a small dependency on an undocumented FastMCP seam (replacing a request handler), which a
+test pins; if the Python SDK gains first-class UI metadata, `instalar` shrinks to a loop. The CSP lists exactly the
+origins the views use, so a host that honours it loads charts and maps and nothing else; a host that does not allow
+external scripts shows the text fallback. Nothing of the user's leaves the machine through the views: they receive
+the tool result from the host and send back only `tools/call` arguments.

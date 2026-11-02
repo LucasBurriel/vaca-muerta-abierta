@@ -3,6 +3,7 @@
     python mcp_server.py                 # Parquet if built, else the committed site/data/ snapshot
     python mcp_server.py --fuente json
     python mcp_server.py --sql           # also expose sql_solo_lectura (opt-in; read-only, allowlisted, LIMITed)
+    python mcp_server.py --sin-apps      # no MCP Apps: tools without _meta.ui, no ui:// resources (ADR-032)
 
 Claude Desktop (claude_desktop_config.json) / Claude Code (.mcp.json):
 
@@ -21,14 +22,17 @@ import json
 import sys
 from pathlib import Path
 
+from vma import apps as APPS
 from vma.consulta import datos as D
 from vma.consulta import herramientas as H
 
 ROOT = Path(__file__).resolve().parent
 
 
-def construir(d: D.Datos, con_sql: bool):
-    """Build the FastMCP server with one MCP tool per registry entry, all delegating to ``H.ejecutar``."""
+def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
+    """Build the FastMCP server with one MCP tool per registry entry, all delegating to ``H.ejecutar``.
+    With ``con_apps`` the four tools that have a view carry ``_meta.ui.resourceUri`` and the ``ui://`` resources
+    are registered (MCP Apps, ADR-032); hosts without the extension ignore both."""
     from mcp.server.fastmcp import FastMCP
 
     mcp = FastMCP(
@@ -43,6 +47,9 @@ def construir(d: D.Datos, con_sql: bool):
 
     def _json(obj) -> str:
         return json.dumps(obj, ensure_ascii=False, default=str)
+
+    def _meta(nombre: str) -> dict | None:
+        return APPS.tool_meta(nombre) if con_apps else None
 
     def _correr(nombre: str, **entrada) -> str:
         entrada = {k: v for k, v in entrada.items() if v is not None}
@@ -132,7 +139,7 @@ def construir(d: D.Datos, con_sql: bool):
     def cargar_mis_pozos(ruta: str, mapeo: dict | None = None, ruta_pozos: str | None = None) -> str:
         return _correr("cargar_mis_pozos", ruta=ruta, mapeo=mapeo, ruta_pozos=ruta_pozos)
 
-    @mcp.tool(description=H.descripcion("comparar_mi_pozo"))
+    @mcp.tool(description=H.descripcion("comparar_mi_pozo"), meta=_meta("comparar_mi_pozo"))
     def comparar_mi_pozo(
         sigla: str,
         tasa: str = "petroleo_m3_d",
@@ -149,7 +156,7 @@ def construir(d: D.Datos, con_sql: bool):
             mes_max=mes_max,
         )
 
-    @mcp.tool(description=H.descripcion("comparar_mi_campania"))
+    @mcp.tool(description=H.descripcion("comparar_mi_campania"), meta=_meta("comparar_mi_campania"))
     def comparar_mi_campania(
         filtros: dict | None = None,
         metrica: str = "ip90_petroleo_m3_d_por_m",
@@ -161,6 +168,23 @@ def construir(d: D.Datos, con_sql: bool):
             filtros=filtros or {},
             metrica=metrica,
             cohorte_ref=cohorte_ref,
+            incluye_outliers=incluye_outliers,
+        )
+
+    @mcp.tool(description=H.descripcion("vecinos_de_mis_pozos"), meta=_meta("vecinos_de_mis_pozos"))
+    def vecinos_de_mis_pozos(
+        radio_km: float = 10.0,
+        filtros: dict | None = None,
+        metrica: str = "ip90_petroleo_m3_d_por_m",
+        max_vecinos: int = 300,
+        incluye_outliers: bool = True,
+    ) -> str:
+        return _correr(
+            "vecinos_de_mis_pozos",
+            radio_km=radio_km,
+            filtros=filtros,
+            metrica=metrica,
+            max_vecinos=max_vecinos,
             incluye_outliers=incluye_outliers,
         )
 
@@ -239,7 +263,7 @@ def construir(d: D.Datos, con_sql: bool):
             q_min=q_min,
         )
 
-    @mcp.tool(description=H.descripcion("simular_campania"))
+    @mcp.tool(description=H.descripcion("simular_campania"), meta=_meta("simular_campania"))
     def simular_campania(
         formacion: str,
         n_pozos: int,
@@ -276,6 +300,8 @@ def construir(d: D.Datos, con_sql: bool):
         def sql_solo_lectura(sql: str, limite: int = H.SQL_LIMIT) -> str:
             return _correr("sql_solo_lectura", sql=sql, limite=limite)
 
+    if con_apps:
+        APPS.instalar(mcp)
     return mcp
 
 
@@ -286,10 +312,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--fuente", default="auto", choices=["auto", "parquet", "json"])
     ap.add_argument("--datos", type=Path, default=ROOT)
     ap.add_argument("--sql", action="store_true", help="exponer sql_solo_lectura (ADR-025)")
+    ap.add_argument(
+        "--sin-apps", action="store_true", help="sin MCP Apps: ni _meta.ui ni recursos ui:// (ADR-032)"
+    )
     args = ap.parse_args(argv)
     d = D.abrir(args.datos, args.fuente)
     print(f"mcp vaca-muerta-abierta: {d.fuente} {d.ruta}, descargados {d.fecha_descarga}", file=sys.stderr)
-    construir(d, args.sql).run(transport="stdio")
+    construir(d, args.sql, con_apps=not args.sin_apps).run(transport="stdio")
     return 0
 
 

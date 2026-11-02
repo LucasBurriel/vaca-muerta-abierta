@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mi campaña en el ranking</title>
+<!--BASE_CSS-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js" integrity="sha512-k37wQcV4v2h6jgYf5IUz1MoSKPpDs630XGSmCaCCOXxy2awgAWKHGZWr9nMyGgk3IOxA1NxdkN8r1JHgkUtMoQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<!--PUENTE-->
+</head>
+<body>
+<h1 id="titulo">Mi campaña contra su grupo público <span id="sint" class="sintetico" hidden>sintético</span></h1>
+<p class="sub" id="sub">Esperando el resultado de <code>comparar_mi_campania</code>…</p>
+<div class="fila" id="tarjetas"></div>
+<div id="grafico" class="grafico"></div>
+<div id="tabla"></div>
+<p class="nota">Cada pozo mío se compara con la mediana pública de <em>su</em> cohorte × formación × ventana; «supera» es el porcentaje de pozos públicos de ese grupo con valor menor. Grupos con menos de 5 pozos no se comparan (ADR-017).</p>
+<div class="cita" id="cita"></div>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let chart = null;
+  function tarjeta(k, v, mio) { return `<div class="tarjeta"><div class="k">${k}</div><div class="v${mio ? " mio" : ""}">${v}</div></div>`; }
+  function render(env) {
+    if (!env || env.error) { $("sub").textContent = "Error: " + ((env && env.error) || "sin datos"); return; }
+    const d = env.datos, r = d.resumen;
+    $("sint").hidden = !(env.notas || []).some((n) => n.includes("SINT"));
+    $("sub").innerHTML = `métrica <code>${d.metrica}</code> · filtros ${JSON.stringify(d.filtros)} · ${r.n_comparados} de ${r.n_mios} pozos comparados`;
+    $("tarjetas").innerHTML =
+      tarjeta("mediana mía", VMA.fmt(r.mediana_mia, 3), true) +
+      tarjeta("mediana pública (de medianas)", VMA.fmt(r.mediana_de_medianas_publicas, 3)) +
+      tarjeta("mío / público (mediano)", VMA.fmt(r.ratio_mediano, 3), true) +
+      tarjeta("pozos sobre la mediana pública", `${r.pozos_sobre_mediana_publica} / ${r.n_comparados}`, true) +
+      tarjeta("supera % (mediano)", r.supera_pct_mediano != null ? Math.round(r.supera_pct_mediano) + " %" : "–", true);
+    const con = d.pozos.filter((p) => p.ratio_vs_mediana != null).sort((a, b) => b.ratio_vs_mediana - a.ratio_vs_mediana);
+    const dark = (VMA.ctx.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
+    chart = chart || echarts.init($("grafico"), dark ? "dark" : null);
+    chart.setOption({
+      backgroundColor: "transparent", animation: false,
+      grid: { left: 90, right: 70, top: 10, bottom: 30 },
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, formatter: (ps) => { const p = con[ps[0].dataIndex]; return `<b>${p.sigla}</b> · ${p.campania || ""}<br>${d.metrica}: ${VMA.fmt(p.mio, 3)}<br>mediana pública (${p.grupo}): ${VMA.fmt(p.mediana_publica, 3)}<br>mío/público: ${VMA.fmt(p.ratio_vs_mediana, 3)} · supera ${Math.round(p.supera_pct_publicos)} % de ${p.n_publico}`; } },
+      xAxis: { type: "value", name: "mío / mediana pública", nameLocation: "middle", nameGap: 20, min: 0 },
+      yAxis: { type: "category", data: con.map((p) => p.sigla), inverse: true, axisLabel: { fontSize: 11 } },
+      series: [
+        { type: "bar", data: con.map((p) => ({ value: p.ratio_vs_mediana, itemStyle: { color: p.ratio_vs_mediana >= 1 ? "#2f7a4a" : "#b5451b" } })), barMaxWidth: 16, label: { show: true, position: "right", formatter: (o) => "supera " + Math.round(con[o.dataIndex].supera_pct_publicos) + " %", fontSize: 10, color: dark ? "#ccc" : "#444" } },
+        { type: "line", markLine: { silent: true, symbol: "none", data: [{ xAxis: 1 }], lineStyle: { color: "#888", type: "dashed" }, label: { formatter: "mediana pública" } }, data: [] },
+      ],
+    }, true);
+    $("grafico").style.height = Math.max(160, 26 * con.length + 60) + "px"; chart.resize();
+    $("tabla").innerHTML = `<table><thead><tr><th>pozo</th><th>campaña</th><th>grupo</th><th>mío</th><th>mediana pública</th><th>mío/público</th><th>supera %</th><th>n público</th></tr></thead><tbody>` +
+      d.pozos.slice(0, 50).map((p) => `<tr class="mio"><td>${p.sigla}</td><td>${p.campania || "–"}</td><td style="text-align:left;font-weight:400;color:var(--muted)">${p.grupo || p.sin_dato_porque || "–"}</td><td>${VMA.fmt(p.mio, 3)}</td><td>${VMA.fmt(p.mediana_publica, 3)}</td><td>${VMA.fmt(p.ratio_vs_mediana, 3)}</td><td>${p.supera_pct_publicos != null ? Math.round(p.supera_pct_publicos) + " %" : "–"}</td><td>${p.n_publico ?? "–"}</td></tr>`).join("") + `</tbody></table>`;
+    const c = env.cita || {};
+    $("cita").innerHTML = `Cita: <code>${c.tabla}</code> · filtros ${JSON.stringify(c.filtros)} · ${c.regla_doc} · datos ${env.fecha_datos}, maestro ${env.version_maestro}, fuente ${env.fuente}`;
+  }
+  VMA.onResult = (res) => render(VMA.parse(res));
+  window.addEventListener("resize", () => chart && chart.resize());
+  VMA.start();
+  if (!VMA.enHost) $("sub").textContent = "Abierto fuera de un host MCP: no hay resultado que mostrar.";
+})();
+</script>
+</body>
+</html>

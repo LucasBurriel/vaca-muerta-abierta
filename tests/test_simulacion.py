@@ -298,7 +298,7 @@ def test_simular_campania_tool(d):
     assert len(dd["tasa_agregada"]["p50"]) == 36 and dd["pozos_en_linea"][0] == 6
     assert dd["final"]["acumulado_p90"] < dd["final"]["acumulado_p50"] < dd["final"]["acumulado_p10"]
     assert r["cita"]["filtros"]["cohorte_ref"] == 2024
-    # default cohort: the newest with 12 publishable months (2024 in the fake tables)
+    # default cohort: the newest with 24 publishable months (2024 in the fake tables)
     r2 = H.ejecutar(
         d, "simular_campania", {"formacion": "Vaca Muerta", "n_pozos": 3, "meses": 12, "n_sim": 20}
     )

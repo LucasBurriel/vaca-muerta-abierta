@@ -435,6 +435,7 @@ def test_every_tool_result_carries_a_citation(d):
         ("comparar_mi_pozo", {"sigla": "MIO-003", "mes_max": 3}),
         ("comparar_mi_campania", {"filtros": {"cohorte": 2024}, "metrica": "ip90_petroleo_m3_d"}),
         ("brechas", {"filtros": {"cohorte": 2024}, "mes_max": 3}),
+        ("vecinos_de_mis_pozos", {"radio_km": 50, "metrica": "ip90_petroleo_m3_d"}),
         # F5: decline fits and campaign Monte Carlo (ADR-031)
         ("pronosticar_pozo", {"sigla": "MIO-002", "mio": True, "n_bootstrap": 0}),
         (

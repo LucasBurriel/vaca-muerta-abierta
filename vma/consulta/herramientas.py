@@ -973,6 +973,152 @@ def brechas(
     )
 
 
+def vecinos_de_mis_pozos(
+    d: Datos,
+    radio_km: float = 10.0,
+    filtros: dict | None = None,
+    metrica: str = "ip90_petroleo_m3_d_por_m",
+    max_vecinos: int = 300,
+    incluye_outliers: bool = True,
+) -> dict:
+    """Mis pozos con coordenadas y los pozos públicos en alcance a menos de radio_km de alguno de ellos (distancia
+    haversine sobre las coordenadas publicadas, de superficie), con la métrica elegida para los dos lados: por cada
+    pozo mío su valor, la mediana de sus vecinos, el cociente, cuántos vecinos y el más cercano; la lista de vecinos
+    con operadora, formación, cohorte, ventana, rama y distancia; y el resumen. filtros como en comparar_mi_campania.
+    Es la base del mapa (MCP App). Requiere cargar_mis_pozos antes."""
+    mis = _mis(d)
+    _check_metrica(d, metrica)
+    if metrica not in mis.indicadores.columns:
+        raise ErrorHerramienta(f"métrica {metrica!r} no está en mis indicadores")
+    radio_km = float(radio_km)
+    if not (0.1 <= radio_km <= 100):
+        raise ErrorHerramienta("radio_km debe estar entre 0.1 y 100")
+    max_vecinos = max(1, min(int(max_vecinos), 2000))
+    try:
+        sel = K._seleccionar(mis, filtros)
+    except K.ErrorComparacion as e:
+        raise ErrorHerramienta(str(e)) from e
+    con_xy = sel[sel.longitud.notna() & sel.latitud.notna()]
+    sin_xy = int(len(sel) - len(con_xy))
+    if con_xy.empty:
+        raise ErrorHerramienta(
+            "ninguno de mis pozos seleccionados tiene longitud y latitud; el mapa necesita coordenadas"
+        )
+    if not (d.tiene("pozos", "longitud") and d.tiene("pozos", "latitud")):
+        raise ErrorHerramienta(f"la fuente {d.fuente} no trae pozos.longitud/latitud")
+    preds = ["i.en_alcance", "p.longitud IS NOT NULL", "p.latitud IS NOT NULL"]
+    if not incluye_outliers:
+        preds.append("coalesce(i.outlier_ip90_m, false) = false")
+    pub = d.df(
+        f"SELECT p.sigla, p.sigla_clave, p.longitud, p.latitud, i.operadora, i.formacion, i.cohorte, i.ventana, i.rama_m, i.{metrica} AS valor "
+        f"FROM pozos p JOIN indicadores i USING (sigla_clave) WHERE {' AND '.join(preds)}"
+    )
+    lat0 = np.radians(pub.latitud.to_numpy(dtype=float))
+    lon0 = np.radians(pub.longitud.to_numpy(dtype=float))
+    mios_out: list[dict] = []
+    vecinos: dict[int, dict] = {}
+    for _, m in con_xy.iterrows():
+        la, lo = math.radians(float(m.latitud)), math.radians(float(m.longitud))
+        a = np.sin((lat0 - la) / 2) ** 2 + np.cos(la) * np.cos(lat0) * np.sin((lon0 - lo) / 2) ** 2
+        dist = 2 * 6371.0 * np.arcsin(np.sqrt(a))
+        idx = np.where(dist <= radio_km)[0]
+        vals = pub.valor.to_numpy(dtype=float)[idx]
+        vals = vals[np.isfinite(vals)]
+        vmio = m.get(metrica)
+        vmio = None if vmio is None or pd.isna(vmio) else float(vmio)
+        med = float(np.median(vals)) if vals.size >= N_MIN else None
+        cercano = int(idx[np.argmin(dist[idx])]) if idx.size else None
+        mios_out.append(
+            {
+                "sigla": m.sigla,
+                "campania": m.get("campania"),
+                "cohorte": None if pd.isna(m.get("cohorte")) else int(m.cohorte),
+                "ventana": m.get("ventana") if isinstance(m.get("ventana"), str) else None,
+                "rama_m": None if pd.isna(m.get("rama_m")) else float(m.rama_m),
+                "longitud": float(m.longitud),
+                "latitud": float(m.latitud),
+                "valor": vmio,
+                "n_vecinos": int(idx.size),
+                "n_vecinos_con_dato": int(vals.size),
+                "mediana_vecinos": med,
+                "ratio_vecinos": (vmio / med) if (vmio is not None and med) else None,
+                "vecino_mas_cercano": pub.sigla.iloc[cercano] if cercano is not None else None,
+                "distancia_min_km": float(dist[cercano]) if cercano is not None else None,
+                "sin_dato_porque": None
+                if med is not None
+                else f"menos de {N_MIN} vecinos con {metrica} (ADR-017)",
+            }
+        )
+        for j in idx:
+            j = int(j)
+            if j not in vecinos or dist[j] < vecinos[j]["distancia_km"]:
+                r = pub.iloc[j]
+                vecinos[j] = {
+                    "sigla": r.sigla,
+                    "sigla_clave": r.sigla_clave,
+                    "operadora": r.operadora,
+                    "formacion": r.formacion,
+                    "cohorte": None if pd.isna(r.cohorte) else int(r.cohorte),
+                    "ventana": r.ventana,
+                    "rama_m": None if pd.isna(r.rama_m) else float(r.rama_m),
+                    "longitud": float(r.longitud),
+                    "latitud": float(r.latitud),
+                    "valor": None if pd.isna(r.valor) else float(r.valor),
+                    "distancia_km": float(dist[j]),
+                    "mio_mas_cercano": m.sigla,
+                }
+    lista = sorted(vecinos.values(), key=lambda v: v["distancia_km"])
+    cortado = len(lista) > max_vecinos
+    lista = lista[:max_vecinos]
+    vmios = [x["valor"] for x in mios_out if x["valor"] is not None]
+    vvec = [v["valor"] for v in vecinos.values() if v["valor"] is not None]
+    resumen = {
+        "mediana_mia": float(np.median(vmios)) if vmios else None,
+        "mediana_vecinos": float(np.median(vvec)) if len(vvec) >= N_MIN else None,
+        "ratio": None,
+        "operadoras": sorted({v["operadora"] for v in vecinos.values() if v["operadora"]}),
+        "cohortes": sorted({v["cohorte"] for v in vecinos.values() if v["cohorte"] is not None}),
+    }
+    if resumen["mediana_mia"] is not None and resumen["mediana_vecinos"]:
+        resumen["ratio"] = resumen["mediana_mia"] / resumen["mediana_vecinos"]
+    exclusiones = []
+    if sin_xy:
+        exclusiones.append(f"{sin_xy} pozo(s) míos sin coordenadas no entran")
+    if not incluye_outliers:
+        exclusiones.append("pozos públicos con outlier_ip90_m = True excluidos (ADR-018)")
+    if cortado:
+        exclusiones.append(f"más de {max_vecinos} vecinos: se listan los {max_vecinos} más cercanos")
+    notas = _notas_propios(mis) + [
+        "coordenadas publicadas de superficie (Capítulo IV), no de la rama; la distancia es haversine en km",
+        "los vecinos mezclan cohortes y ventanas: la mediana de vecinos es contexto geográfico, no una curva tipo",
+    ]
+    datos = {
+        "metrica": metrica,
+        "unidad": METRICAS[metrica],
+        "radio_km": radio_km,
+        "n_mios": len(mios_out),
+        "n_vecinos": len(vecinos),
+        "resumen": resumen,
+        "mios": mios_out[:MAX_FILAS],
+        "vecinos": lista,
+    }
+    return _envolver(
+        _redondear(datos),
+        d=d,
+        tabla="mis_indicadores (sesión) × pozos + indicadores",
+        columnas=["longitud", "latitud", metrica, "operadora", "formacion", "cohorte", "ventana", "rama_m"],
+        filtros={
+            "radio_km": radio_km,
+            "filtros": filtros or {},
+            "metrica": metrica,
+            "incluye_outliers": incluye_outliers,
+        },
+        regla_doc=f"{DOC_PROPIOS}#vecinos_de_mis_pozos; docs/maestro.md (coordenadas); ADR-017",
+        exclusiones=exclusiones,
+        notas=notas,
+    )
+
+
 # --- simulation: decline fits and campaign Monte Carlo (F5, ADR-031) -----------------------------------------------
 
 NOTA_SIMULACION = (
@@ -1236,11 +1382,11 @@ def simular_campania(
         raise ErrorHerramienta(f"formación {formacion!r} no existe en indicadores.formacion")
     if cohorte_ref is None:
         (cohorte_ref,) = d.con.execute(
-            "SELECT max(cohorte) FROM curvas_tipo WHERE formacion = ? AND nivel = 'cohorte_formacion' AND publicable AND mes >= 12",
+            "SELECT max(cohorte) FROM curvas_tipo WHERE formacion = ? AND nivel = 'cohorte_formacion' AND publicable AND mes >= 23",
             [f],
         ).fetchone()
         if cohorte_ref is None:
-            raise ErrorHerramienta(f"ninguna cohorte de {f} tiene 12 meses publicables; pasá cohorte_ref")
+            raise ErrorHerramienta(f"ninguna cohorte de {f} tiene 24 meses publicables; pasá cohorte_ref")
     if ventana is not None and ventana not in ("petroleo", "volatil_condensado", "gas"):
         raise ErrorHerramienta("ventana debe ser petroleo, volatil_condensado o gas")
     nivel = "cohorte_formacion_ventana" if ventana else "cohorte_formacion"
@@ -1540,6 +1686,19 @@ HERRAMIENTAS.update(
                     "filtros": _FILTROS_MIOS_SCHEMA,
                     "metrica": {"type": "string", "enum": sorted(METRICAS)},
                     "cohorte_ref": _INT,
+                    "incluye_outliers": _BOOL,
+                },
+                [],
+            ),
+        },
+        "vecinos_de_mis_pozos": {
+            "fn": vecinos_de_mis_pozos,
+            "schema": _schema(
+                {
+                    "radio_km": {"type": "number"},
+                    "filtros": _FILTROS_MIOS_SCHEMA,
+                    "metrica": {"type": "string", "enum": sorted(METRICAS)},
+                    "max_vecinos": _INT,
                     "incluye_outliers": _BOOL,
                 },
                 [],

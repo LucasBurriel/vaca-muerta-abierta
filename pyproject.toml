@@ -34,6 +34,9 @@ Homepage = "https://github.com/LucasBurriel/vaca-muerta-abierta"
 [tool.setuptools.packages.find]
 include = ["vma*"]
 
+[tool.setuptools.package-data]
+"vma.apps" = ["ui/*.html", "ui/*.js", "ui/*.css"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

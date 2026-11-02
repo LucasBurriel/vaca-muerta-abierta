@@ -61,7 +61,7 @@ ajusta y lo dice. `uptime` por defecto 0.92 porque la curva tipo ya es por día 
 
 Monte Carlo de `n_pozos` pozos nuevos (`vma/simulacion/campania.py`):
 
-1. Se toma la curva tipo publicada de `formacion × cohorte_ref` (por defecto la cohorte más nueva con 12 meses
+1. Se toma la curva tipo publicada de `formacion × cohorte_ref` (por defecto la cohorte más nueva con 24 meses
    publicables) `× ventana` si se da. Si se pasa `rama_m` y el grupo tiene curva **por metro** publicable, se
    muestrea la tasa por metro y se multiplica por la rama (la producción escala con el lateral); si no, se usa la
    curva absoluta y se avisa que la rama se ignoró.
