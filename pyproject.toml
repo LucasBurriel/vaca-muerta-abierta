@@ -25,9 +25,9 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6", "mcp>=1.2", "pyarrow>=15"]  # mcp: tests/test_apps.py; pyarrow: pandas.to_parquet in tests
-mcp = ["mcp>=1.2"]  # F5: the MCP server alone (vma-mcp); the tools need no model
-agente = ["anthropic>=0.75", "mcp>=1.2"]  # F4: the Claude provider and the MCP server; tools and tests need neither
+dev = ["pytest>=8", "ruff>=0.6", "mcp>=1.2,<2", "pyarrow>=15"]  # mcp: tests/test_apps.py; pyarrow: pandas.to_parquet in tests
+mcp = ["mcp>=1.2,<2"]  # F5: the MCP server alone (vma-mcp); the tools need no model
+agente = ["anthropic>=0.75", "mcp>=1.2,<2"]  # F4: the Claude provider and the MCP server; tools and tests need neither
 
 [project.scripts]
 vma-mcp = "mcp_server:main"
