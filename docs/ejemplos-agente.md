@@ -183,3 +183,44 @@ Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
 Validador: ok · turnos 2, reintentos 0. Public data only (no "my wells" here): the per-metre curve of the 2022 oil
 window scaled by a 2,800 m lateral, 12 wells starting together, the band being the published dispersion between
 wells and nothing else (`docs/simulacion.md`). In Claude Desktop the same call opens the simulator view with sliders.
+
+## ¿Cuánto vale en dólares, al último precio y neto de regalías, esa campaña de 12 pozos? (F6, 2026-11-02)
+
+Run on 2026-11-02 with the `precios` table built from the two sources downloaded that day (crude prices realised
+to 2026-08, gas to 2026-08).
+
+```
+-> simular_campania({"formacion": "Vaca Muerta", "n_pozos": 12, "meses": 120, "n_sim": 300, "ventana": "petroleo", "cohorte_ref": 2022, "rama_m": 2800.0, "valorizar": {"modo": "ultimo", "regalia": 0.12}})
+
+- Campaña simulada de 12 pozos (Vaca Muerta 2022, petroleo, 300 corridas): acumulado a 120 meses P90 1154000.0 / P50 1365000.0 / P10 1581000.0 m³; por pozo P50 113800.0; tasa pico P50 2215.0 en el mes 3 [curvas_tipo: mes, petroleo_m3_d_por_m_p10, petroleo_m3_d_por_m_p50, petroleo_m3_d_por_m_p90; formacion = Vaca Muerta, cohorte_ref = 2022, ventana = petroleo, n_pozos = 12, meses = 120, rama_m = 2800.0, tasa = petroleo_m3_d, n_sim = 300, semilla = 0, uptime = 0.92, incluye_outliers = True]
+  · USD p50 (120 meses, precio ultimo): ingreso 598700000.0 USD (bruto 680300000.0, regalía 81630000.0), VAN 484900000.0 USD al 0.1 anual [precios: producto, region, anio; modo = ultimo, tasa_anual = 0.1, regalia = 0.12, petroleo = {'region': 'Neuquén', 'segmento': 'promedio_venta'}]
+  · USD p10 (120 meses, precio ultimo): ingreso 693400000.0 USD (bruto 787900000.0, regalía 94550000.0), VAN 558500000.0 USD al 0.1 anual [precios: …]
+  · USD p90 (120 meses, precio ultimo): ingreso 506100000.0 USD (bruto 575100000.0, regalía 69020000.0), VAN 412300000.0 USD al 0.1 anual [precios: …]
+  Nota USD: p10/p50/p90 = la banda del acumulado de la campaña (petroleo_m3_d) convertida a volumen mensual; modo historico necesita valorizar.mes0 (mes calendario del mes 0 de la campaña)
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+Validador: ok · turnos 2, reintentos 0. The same simulation, now in dollars: the P50 cumulative of 1.365 million m³
+at the last realised Neuquén crude price (498.4 USD/m³ for 2026-08, provisional) is 680 million USD gross, 599
+million after the 12 % royalty the question asked for, 485 million discounted at 10 % per year. The mock asked for
+`modo = ultimo` because the question said "último precio" and `regalia = 0.12` because it said "regalías"; the full
+envelope carries the price citation (`precios`, region, segment, last published month), the note that this is
+gross revenue with no capex, opex or taxes, and that the gas price conversion assumes 9,300 kcal/m³ (ADR-034,
+ADR-035). In Claude Desktop the simulator view shows the same as a **USD/mes** band with an NPV card.
+
+## ¿A cuánto está el precio del gas en la cuenca Neuquina? (F6)
+
+```
+-> precios({"producto": "gas"})
+
+- Precio de gas en Neuquina (ppp, total), 2024-09 a 2026-08: último 3.94 USD/MMBTU (2026-08), promedio 3.027, mín 2.4, máx 4.01 [precios: producto, region, segmento, contrato; producto = gas, region = Neuquina, segmento = ppp, contrato = total, desde = 2024-09, hasta = 2026-08]
+  · 2026-06: 3.98 USD/MMBTU = 146.9 USD/mil m³
+  · 2026-07: 3.96 USD/MMBTU = 146.1 USD/mil m³
+  · 2026-08: 3.94 USD/MMBTU = 145.4 USD/mil m³
+  Nota: gas: sin cuenca conocida; se usa el precio de Neuquina (ADR-035); valorizar.region_gas lo cambia
+Datos: descargados el 2026-10-30, maestro 2026-10-31, fuente parquet
+```
+
+Validador: ok. The weighted average (`ppp`) over every segment under the `total` contract, the default the
+valuation uses; `segmento` and `contrato` pick another series (`expo`, `usina` under `firme`…) and `region`
+another basin. The USD per mil m³ column is the 9,300 kcal/m³ conversion (`docs/precios.md`).

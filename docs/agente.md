@@ -40,7 +40,7 @@ Every tool returns the same envelope, and the model is told to quote `cita` next
 | tool | arguments | answers | cites |
 |---|---|---|---|
 | `metadatos` | — | Qué datos hay: fecha de descarga, versión del maestro, fuente (parquet o json), tablas con filas y columnas, hashes SHA-256 del manifiesto | `meta.json` / `manifest.json` |
-| `describir_tabla` | `tabla` ∈ pozos, indicadores, curvas_tipo | Columnas y tipos de una tabla publicada, filas, y la documentación donde está la regla de cada columna; for `indicadores`, the aggregable metrics; for `curvas_tipo`, levels and rates | `docs/maestro.md`, `docs/indicadores.md` |
+| `describir_tabla` | `tabla` ∈ pozos, indicadores, curvas_tipo, precios | Columnas y tipos de una tabla publicada, filas, y la documentación donde está la regla de cada columna; for `indicadores`, the aggregable metrics; for `curvas_tipo`, levels and rates; for `precios` (F6), products, segments and regions, and whether the source has it | `docs/maestro.md`, `docs/indicadores.md`, `docs/precios.md` |
 | `buscar_pozo` | `texto`, `maximo` | Busca pozos por sigla con los niveles de normalización de `vma/normalize.py` (L2 upper + single spaces, L3 without `(h)`, L4 alphanumerics only, then substring); returns sigla, sigla_clave, operadora, formación and the level that matched | `pozos` |
 | `ficha_pozo` | `sigla_clave` | Todo lo publicado de un pozo: maestro + indicadores, the flags, and for each null indicator its reason (`sin_dato_porque`: the flag that explains it, e.g. `ip90_petroleo_m3_d_por_m: flags sin_rama_sin_fractura`) | `pozos + indicadores` |
 | `comparar_grupo` | `formacion`, `cohorte?`, `dimension` ∈ operadora, ventana, cohorte, area, formacion; `metrica`, `n_min` (5), `incluye_outliers`, `ventana?` | Compara una métrica de indicadores entre grupos de una formación: median, P25, P75, `n_pozos`, `n_con_dato` per group; groups under `n_min` listed apart with null statistics; how many wells have no value and by which flag | `indicadores` |
@@ -76,6 +76,16 @@ three comparison tools answer *no hay datos propios cargados en esta sesión*.
 rates, not reservoir simulation: models, assumptions, limits and the band's meaning are in
 [docs/simulacion.md](simulacion.md) (ADR-031). A public well's own monthly series needs the Parquet source and the
 raw download; on a fresh clone use the type-curve variant.
+
+### Money (F6)
+
+`precios` reads the fourth published table; `curva_tipo`, `comparar_mi_pozo`, `comparar_mi_campania`,
+`pronosticar_pozo` and `simular_campania` take an optional `valorizar = {modo, precio_flat?, tasa_anual?,
+regalia?, mes0?, region_petroleo?, region_gas?, segmento_gas?, contrato_gas?, uptime?}` and add a `usd` block with
+its own citation to `precios` (or to the user's flat price), the resolved regions, USD per month, cumulative and
+NPV. Without the parameter the result is unchanged. Sources, conversions, modes and what is deliberately not
+included (every cost) are in [docs/precios.md](precios.md) (ADR-034, ADR-035); the system prompt's rule 7 makes the
+model say "gross revenue" and the price mode every time.
 
 ### Parquet vs JSON
 

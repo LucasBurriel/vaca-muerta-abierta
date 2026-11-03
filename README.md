@@ -19,6 +19,7 @@ This repository builds an **open observatory** on top of it, in phases that each
 | **F2 · Indicators** | one row per well: IP30/90/180 in producing days, cumulatives at 6/12/24 months, everything per metre of lateral, GOR, water cut, fluid window, flags and lineage; type curves P10/P50/P90 by cohort × formation (× window, × operator) with `n_pozos`, published with and without outliers | **done** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
 | **F3 · Site** | static explorer: wells table with "no data because…" cells, type curves P10/P50/P90 with `n`, Leaflet map, method page; pre-aggregated JSON from the pipeline, rebuilt monthly by CI and deployed to GitHub Pages | **done** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
 | **F4 · Ask it questions** | a local agent (`agente.py`, CLI + chat) and an MCP server (`mcp_server.py`) over seven typed, read-only tools on the published tables; every result carries its citation (table, columns, filters, rule); a validator rejects any number the tools did not return; works on the committed JSON snapshot or on the Parquet tables | **done** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
+| **F6 · Talk money** | public prices as a published table: the realised crude price in USD/m³ by province and month (royalties report, since 1991) and the Res. 1/2018 gas price in USD/MMBTU by basin, segment and contract (since 2019), converted to the observatory's volume units; a `precios` tool and a `valorizar` parameter on type curves, your wells, your campaign, the decline forecast and the campaign simulator that adds USD per month, cumulative and a simple NPV with three price modes (historical, flat, last published) and an optional royalty; **gross revenue only**, no costs, said in every result; the MCP Apps views switch between m³/d and USD/mes and show the NPV | **done** → [`docs/precios.md`](docs/precios.md), ADR-034, ADR-035 |
 | **F5 · Compare your wells** | a "my data" module: load your own monthly production (CSV/Parquet) in the session, compare each well with the published type curve of its cohort × formation × window, each campaign with its public medians, gaps below P50, neighbours on a map; Arps/Duong decline fits with EUR and a bootstrap band, campaign Monte Carlo from the published curves; MCP Apps views in Claude Desktop with text fallback; `vma-mcp` installable with `uvx`; five more public datasets catalogued (reserves, prices, royalties, field production, concessions); a synthetic dataset for tests and demos. Your data never leaves your machine | **done** → [For operators](#for-operators-compare-your-wells-f5-2026-11-02), [`docs/mis-datos.md`](docs/mis-datos.md), [`docs/simulacion.md`](docs/simulacion.md), [`docs/mcp-apps.md`](docs/mcp-apps.md) |
 
 ## For operators: compare your wells (F5, 2026-11-02)
@@ -38,6 +39,13 @@ and gone when the process ends; nothing is written, cached or uploaded (ADR-030)
 | `pronosticar_pozo(sigla, mio?)` | Arps / Duong decline fit, EUR to 20-30 years with a bootstrap band ([docs/simulacion.md](docs/simulacion.md)) |
 | `pronosticar_curva_tipo(nivel, claves)` | the same on a published type curve (works on a fresh clone) |
 | `simular_campania(formacion, n_pozos, …)` | Monte Carlo of a campaign sampled from a published type curve: P10/P50/P90 of rate and cumulative per month |
+| `precios(producto, region?, desde?, hasta?)` | **F6.** the public monthly price: crude USD/m³ by province, gas USD/MMBTU by basin and segment, converted to USD per mil m³ ([docs/precios.md](docs/precios.md)) |
+| `valorizar={modo, precio_flat?, tasa_anual?, regalia?}` on `curva_tipo`, `comparar_mi_pozo`, `comparar_mi_campania`, `pronosticar_pozo`, `simular_campania` | **F6.** adds a `usd` block: gross revenue per month, cumulative and NPV (10 % by default) at the historical, a flat or the last published price; royalty optional; no costs, and the result says so |
+
+Ask it money questions the same way: *"¿Cuánto vale en dólares, al último precio y neto de regalías, una campaña
+de 12 pozos en Vaca Muerta, ventana de petróleo, cohorte 2022, con rama de 2800 m?"* runs `simular_campania`
+with `valorizar` and answers with the P10/P50/P90 revenue and NPV, each number citing the `precios` table
+([docs/ejemplos-agente.md](docs/ejemplos-agente.md)).
 
 In **Claude Desktop** (and other hosts that implement [MCP Apps](https://github.com/modelcontextprotocol/ext-apps))
 four of them also open a view in the chat: the type curve with your well on top, the map of your wells among the
@@ -262,9 +270,12 @@ python mcp_server.py           # MCP over stdio for Claude Desktop / Claude Code
 python pipeline.py sintetico   # F5: a synthetic "my wells" dataset from public wells + noise -> data/sintetico/<today>/
 python -m vma.apps.demo --servir   # F5: a local host that renders the four MCP Apps views on the synthetic data
 vma-mcp                        # the server as an entry point (pip install -e . or uvx); data from the clone, VMA_DATOS or the cached snapshot
+
+python pipeline.py download regalias_crudo precios_gas   # F6: the two price sources (opt-in, ~1.5 MB)
+python pipeline.py precios     # F6: -> data/publicado/<date>/precios.{csv,parquet} + site/data/precios.json (owner's manual step)
 ```
 
-Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib` (+ `anthropic`, `mcp` for the agent). Raw data is never committed; the manifest is what
+Python 3.11+. Dependencies: `duckdb`, `pandas`, `matplotlib`, `openpyxl` (+ `anthropic`, `mcp` for the agent). Raw data is never committed; the manifest is what
 makes two downloads comparable. The site needs no Node and no server beyond a static file server.
 
 GitHub Pages for a fork: enable it once with build type *GitHub Actions* (Settings → Pages, or
@@ -296,31 +307,35 @@ vma/
                       in-memory views) · comparar.py (well vs curve, campaign vs medians, gaps) · sintetico.py (public wells + noise)
   simulacion/         F5: declinacion.py (Arps, Duong, EUR, bootstrap) · campania.py (Monte Carlo from a type curve) · series.py
   apps/               F5: MCP Apps: four ui:// views (ui/*.html + puente.js + base.css), tool meta, resource CSP; demo.py (local test host)
+  precios/            F6: fuentes.py (the two price parsers, the precios table, the site snapshot) · valorizar.py (volumes -> USD, NPV)
   consulta/ubicacion.py  F5: where the data is when installed as a package (clone, VMA_DATOS, cached public snapshot)
 agente.py             ask a question or chat; mcp_server.py  the same tools as an MCP server (stdio); entry points vma-agente, vma-mcp
 site/                 the static site: index · explorador · curvas · mapa · metodo (.html), js/, css/, data/ (generated, committed)
 .github/workflows/    tests.yml (every push, no data; runs the mock agent) · publish.yml (monthly + manual: download → tables → site → GitHub Pages)
 docs/
   fuentes.md          every dataset: URL, licence, grain, size, last data, units as published; the extended catalogue (F5)
-  decisiones.md       ADRs 001-033: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+  decisiones.md       ADRs 001-035: name, scope, well key, units, raw-data policy, stack, capiv, lateral
                       precedence, master universe, alias policy, placeholder dates, publication format,
                       indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window,
                       site stack, site data (JSON vs Parquet in the browser), what the site cuts, publish cadence,
                       F4 local agent + MCP without free SQL, Parquet/JSON double source, citation validator, model + mock,
-                      F5 extended catalogue, own data never persisted + synthetic, simulation declared as DCA, MCP Apps, packaging
+                      F5 extended catalogue, own data never persisted + synthetic, simulation declared as DCA, MCP Apps, packaging,
+                      F6 price sources and the 9,300 kcal/m³ conversion, valuation as gross revenue with three price modes
   maestro.md          every column of the master with its rule, and every flag
   indicadores.md      every column of indicadores and curvas_tipo: formula, units, rule, flags
   agente.md           F4: the tools, the envelope, the validator, providers, MCP config · ejemplos-agente.md  transcripts (F4 and F5)
   mis-datos.md        F5: your file's schema, mapping, validation, what is computed, the comparison tools, the synthetic dataset
   simulacion.md       F5: decline models, fitting, EUR, bootstrap band, campaign Monte Carlo, assumptions and limits
   mcp-apps.md         F5: the four views, how the extension is served from Python, configuration, how it was tested
+  precios.md          F6: the two price sources and how the XLSX is read, the precios table, the MMBTU conversion, the valuation modes, limits
   esquemas/           one markdown per dataset with its real columns
   calidad-*.png       charts of the quality report · maestro-*.png  charts of the master report · sitio-*.png  screenshots of the site
 informes/             dated reports: calidad-<date>.md (F0), maestro-<date>.md (F1), indicadores-<date>.md (F2), diff-<a>-<b>.md
 alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (appended by the build); borradores/
-data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.* (git-ignored, rebuild or take the release)
+data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.*, precios.* (git-ignored, rebuild or take the release)
 tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract, F4 tools on Parquet and JSON + validator + mock agent,
-                      F5 own data + synthetic fixture, decline fits and Monte Carlo, MCP Apps protocol on an in-memory client, packaging
+                      F5 own data + synthetic fixture, decline fits and Monte Carlo, MCP Apps protocol on an in-memory client, packaging,
+                      F6 price parsers on fixtures with the real layout, hand-computed valuation, tools with and without valorizar
 ```
 
 ## Rules this repository follows

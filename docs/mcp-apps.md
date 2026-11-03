@@ -11,10 +11,10 @@ que ven el agente CLI y Claude Code, que hoy no renderiza Apps. ADR-032.
 
 | recurso | herramienta | qué dibuja |
 |---|---|---|
-| `ui://vaca-muerta/curva_mia.html` | `comparar_mi_pozo` | P10/P50/P90 publicados del grupo con la historia del pozo propio superpuesta (eje log), percentil por mes, IP90 e IP90/m contra el grupo, tabla mensual |
+| `ui://vaca-muerta/curva_mia.html` | `comparar_mi_pozo` | P10/P50/P90 publicados del grupo con la historia del pozo propio superpuesta (eje log), percentil por mes, IP90 e IP90/m contra el grupo, tabla mensual; con `valorizar`, conmutador **m³/d \| USD/mes** y tarjetas de VAN (mío y pozo tipo P50) (F6) |
 | `ui://vaca-muerta/mapa_vecinos.html` | `vecinos_de_mis_pozos` | mapa Leaflet con mis pozos y los pozos públicos vecinos (tamaño ∝ métrica), popup con operadora, cohorte, ventana, rama y distancia; tabla mío vs mediana de vecinos |
 | `ui://vaca-muerta/ranking_posicion.html` | `comparar_mi_campania` | barras del cociente mío / mediana pública por pozo, con el porcentaje de pozos públicos que supera; tarjetas del resumen |
-| `ui://vaca-muerta/simulador_campania.html` | `simular_campania` | bandas P10/P50/P90 de tasa agregada y acumulado, tarjetas del final y **controles** (pozos, meses, rama, ritmo, uptime, ventana, cohorte) que vuelven a llamar a la herramienta desde el iframe |
+| `ui://vaca-muerta/simulador_campania.html` | `simular_campania` | bandas P10/P50/P90 de tasa agregada y acumulado, tarjetas del final y **controles** (pozos, meses, rama, ritmo, uptime, ventana, cohorte) que vuelven a llamar a la herramienta desde el iframe; con `valorizar`, conmutador **m³/d \| USD/mes** sobre las dos bandas, tarjeta de VAN P50 con P10/P90 y controles de precio (modo, flat en USD/bbl o USD/MMBTU, mes0, tasa, regalía) que viajan en `valorizar` al re-simular (F6, [precios.md](precios.md)) |
 
 Todo lo que se dibuja sale del mismo envelope que el modelo recibe como texto, cita incluida (se muestra al pie de
 cada vista). Los datos de ejemplo de la documentación y del host de prueba son el sintético de
@@ -89,10 +89,17 @@ Con el paquete instalado (`pip install -e ".[agente]"` o `uvx`), `vma-mcp` reemp
 
    ![mapa de vecinos](mcp-app-mapa-vecinos-claude-desktop.png)
 
+5. **Dólares (F6, 2026-11-02)**: las dos vistas con `usd` se probaron en el host de prueba con el navegador
+   integrado del escritorio contra `python -m vma.apps.demo --servir`: el conmutador cambia las series a USD/mes
+   (la del pozo propio y las tres del pozo tipo; las dos bandas del simulador), las tarjetas de VAN aparecen sólo
+   cuando el resultado trae el bloque, y el simulador re-llama a `simular_campania` con `valorizar` armado desde el
+   formulario (modo flat a 65 USD/bbl con 12 % de regalía) y redibuja. En Claude Desktop no se probó todavía.
+
 ## Límites
 
 - Las vistas leen el resultado del texto JSON (`content[0].text`); si un host recorta el contenido largo, la vista
-  dirá «sin datos». `simular_campania` ya acota el envelope (bandas por mes a 4 cifras).
+  dirá «sin datos». `simular_campania` ya acota el envelope (bandas por mes a 4 cifras); con `valorizar` suma tres
+  series más (USD por mes y acumulado por cuantil).
 - Sin `fetch` desde el iframe: todo pasa por el host (`tools/call`), que puede pedir confirmación al usuario.
 - Los tiles de OpenStreetMap son un origen externo más: si el host no lo permite en su CSP, el mapa queda sin fondo
   pero los puntos y la tabla siguen.

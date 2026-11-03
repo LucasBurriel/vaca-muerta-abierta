@@ -19,6 +19,7 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 | **F2 · Indicadores** | una fila por pozo: IP30/90/180 en días efectivos, acumulados a 6/12/24 meses, todo por metro de rama, GOR, corte de agua, ventana de fluido, flags y linaje; curvas tipo P10/P50/P90 por cohorte × formación (× ventana, × operadora) con `n_pozos`, publicadas con y sin outliers | **hecha** → [`informes/indicadores-2026-10-31.md`](informes/indicadores-2026-10-31.md) |
 | **F3 · Sitio** | explorador estático: tabla de pozos con celdas "sin dato porque…", curvas tipo P10/P50/P90 con `n`, mapa Leaflet, página de método; JSON pre-agregados por el pipeline, regenerado cada mes por CI y publicado en GitHub Pages | **hecha** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
 | **F4 · Preguntas en lenguaje natural** | agente local (`agente.py`, CLI y chat) y servidor MCP (`mcp_server.py`) sobre siete herramientas tipadas de solo lectura; cada resultado trae su cita (tabla, columnas, filtros, regla); un validador rechaza cualquier número que las herramientas no devolvieron; funciona con el snapshot JSON commiteado o con las tablas Parquet | **hecha** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
+| **F6 · Hablar de plata** | precios públicos como una tabla más: el precio realizado del crudo en USD/m³ por provincia y mes (informe de regalías, desde 1991) y el precio del gas Res. 1/2018 en USD/MMBTU por cuenca, segmento y contrato (desde 2019), convertidos a las unidades de volumen del observatorio; una herramienta `precios` y un parámetro `valorizar` en curvas tipo, mis pozos, mi campaña, pronóstico y simulador de campaña que agrega USD por mes, acumulado y un VAN simple con tres modos de precio (histórico, flat, último publicado) y regalía opcional; **sólo ingreso bruto**, sin costos, dicho en cada resultado; las vistas MCP Apps conmutan entre m³/d y USD/mes y muestran el VAN | **hecha** → [`docs/precios.md`](docs/precios.md), ADR-034, ADR-035 |
 | **F5 · Compará tus pozos** | módulo «mis datos»: cargás tu producción mensual (CSV/Parquet) en la sesión y comparás cada pozo con la curva tipo publicada de su cohorte × formación × ventana, cada campaña con sus medianas públicas, brechas contra el P50, vecinos en un mapa; ajustes de declinación Arps/Duong con EUR y banda bootstrap, Monte Carlo de campaña desde las curvas publicadas; vistas MCP Apps en Claude Desktop con texto de respaldo; `vma-mcp` instalable con `uvx`; cinco datasets públicos más catalogados (reservas, precios, regalías, producción por yacimiento, concesiones); un dataset sintético para tests y demos. Tus datos no salen de tu máquina | **hecha** → [Para operadoras](#para-operadoras-compará-tus-pozos-f5-02-11-2026), [`docs/mis-datos.md`](docs/mis-datos.md), [`docs/simulacion.md`](docs/simulacion.md), [`docs/mcp-apps.md`](docs/mcp-apps.md) |
 
 ## Para operadoras: compará tus pozos (F5, 02-11-2026)
@@ -38,6 +39,13 @@ cuando el proceso termina; nada se escribe, cachea ni sube (ADR-030). Clave prop
 | `pronosticar_pozo(sigla, mio?)` | ajuste de declinación Arps / Duong, EUR a 20-30 años con banda bootstrap ([docs/simulacion.md](docs/simulacion.md)) |
 | `pronosticar_curva_tipo(nivel, claves)` | lo mismo sobre una curva tipo publicada (funciona en un clon fresco) |
 | `simular_campania(formacion, n_pozos, …)` | Monte Carlo de una campaña muestreada de una curva tipo publicada: P10/P50/P90 de tasa y acumulado por mes |
+| `precios(producto, region?, desde?, hasta?)` | **F6.** el precio público mensual: crudo USD/m³ por provincia, gas USD/MMBTU por cuenca y segmento, convertido a USD por mil m³ ([docs/precios.md](docs/precios.md)) |
+| `valorizar={modo, precio_flat?, tasa_anual?, regalia?}` en `curva_tipo`, `comparar_mi_pozo`, `comparar_mi_campania`, `pronosticar_pozo`, `simular_campania` | **F6.** agrega el bloque `usd`: ingreso bruto por mes, acumulado y VAN (10 % por defecto) al precio histórico, a uno flat o al último publicado; regalía opcional; sin costos, y el resultado lo dice |
+
+Las preguntas de plata se hacen igual: *«¿Cuánto vale en dólares, al último precio y neto de regalías, una campaña
+de 12 pozos en Vaca Muerta, ventana de petróleo, cohorte 2022, con rama de 2800 m?»* corre `simular_campania` con
+`valorizar` y contesta el ingreso y el VAN P10/P50/P90, cada número citando la tabla `precios`
+([docs/ejemplos-agente.md](docs/ejemplos-agente.md)).
 
 En **Claude Desktop** (y otros hosts que implementan [MCP Apps](https://github.com/modelcontextprotocol/ext-apps))
 cuatro de ellas abren además una vista en el chat: la curva tipo con tu pozo encima, el mapa de tus pozos entre los
@@ -223,9 +231,12 @@ python mcp_server.py           # servidor MCP (stdio) para Claude Desktop / Clau
 python pipeline.py sintetico   # F5: dataset «mis pozos» sintético desde pozos públicos + ruido -> data/sintetico/<hoy>/
 python -m vma.apps.demo --servir   # F5: host local que dibuja las cuatro vistas MCP Apps con el sintético
 vma-mcp                        # el servidor como entry point (pip install -e . o uvx); datos del clon, VMA_DATOS o el snapshot cacheado
+
+python pipeline.py download regalias_crudo precios_gas   # F6: las dos fuentes de precio (opt-in, ~1,5 MB)
+python pipeline.py precios     # F6: -> data/publicado/<fecha>/precios.{csv,parquet} + site/data/precios.json (paso manual del dueño)
 ```
 
-Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib` (+ `anthropic`, `mcp` para el agente). Los datos crudos nunca se versionan; el manifiesto
+Python 3.11+. Dependencias: `duckdb`, `pandas`, `matplotlib`, `openpyxl` (+ `anthropic`, `mcp` para el agente). Los datos crudos nunca se versionan; el manifiesto
 es lo que hace comparables dos descargas.
 
 ## Reglas del repositorio

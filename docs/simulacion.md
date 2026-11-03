@@ -94,6 +94,24 @@ sin ella la curva mezcla fluidos (ADR-020) y la nota lo dice.
 - Nada de esto reemplaza un modelo de reservorio ni un análisis económico; sirve para ordenar magnitudes y
   comparar escenarios con la misma vara, citando de dónde sale cada número.
 
+## En dólares: `valorizar` (F6)
+
+`pronosticar_pozo` y `simular_campania` aceptan `valorizar = {modo?, precio_flat?, tasa_anual?, regalia?, mes0?,
+region_petroleo?, region_gas?}` y agregan el bloque `usd` sin tocar el resto del resultado
+([precios.md](precios.md), ADR-035). Es **ingreso bruto**: volumen × precio público, sin capex, opex ni impuestos,
+regalías sólo con `regalia`.
+
+- `pronosticar_pozo`: valoriza el volumen mensual del pronóstico P50 (la historia observada a precio de cada mes,
+  modo `historico` por defecto, y la curva ajustada al último precio publicado, que la nota cuenta), para la tasa
+  pedida: petróleo o gas; `equivalente_m3_d` no se valoriza. El pozo público toma la provincia y la cuenca del
+  maestro; el mío, Neuquén / Neuquina salvo que se indique otra región. La banda bootstrap del EUR no se valoriza.
+- `simular_campania`: valoriza las bandas P10/P50/P90 del acumulado convertidas a volumen mensual, al último precio
+  publicado por defecto (`ultimo`), a un precio flat (`precio_flat.petroleo_usd_bbl` o `gas_usd_mmbtu`) o al
+  histórico desde `valorizar.mes0`. Cada cuantil a precio fijo: no hay incertidumbre de precio en la banda. La
+  vista del simulador tiene el conmutador m³/d | USD/mes, tarjetas de VAN y los controles de precio.
+
+VAN = Σ ingreso × (1 + tasa)^(−mes/12), tasa anual 10 % por defecto, mes 0 sin descontar.
+
 ## Tests
 
 `tests/test_simulacion.py`: cada modelo recupera sus parámetros a partir de su propia curva; `auto` elige el

@@ -111,6 +111,25 @@ Per well: months compared, months below P50 split into 0-5 / 6-11 / 12+, `acum_m
 and `brecha_acum_pct`, the worst month. Total over the selected wells. Only months with a published statistic
 enter (ADR-017). It is a comparison of rates, not an accounting loss: no prices, no downtime model.
 
+### In dollars: `valorizar` on `comparar_mi_pozo` and `comparar_mi_campania` (F6)
+
+Both accept `valorizar = {modo?, precio_flat?, tasa_anual?, regalia?, region_petroleo?, region_gas?, uptime?}`
+and add a `usd` block without changing anything else ([docs/precios.md](precios.md), ADR-035). The default mode is
+`historico`: each of your months at the public price of that calendar month (crude USD/m³ by province from the
+royalties report, gas USD/MMBTU by basin converted at 9,300 kcal/m³), the last published price held after it.
+
+- `comparar_mi_pozo`: `usd.mio` is your real oil + gas volumes month by month in USD, cumulative and NPV (10 % per
+  year by default, month 0 undiscounted); `usd.grupo_p10`, `grupo_p50`, `grupo_p90` value the type well of your
+  group in the **same calendar months** (published rate × 30.44 d × your observed uptime), so the gap to P50 can be
+  read in dollars. The MCP App view adds a **m³/d | USD/mes** switch and NPV cards.
+- `comparar_mi_campania`: per well, the gross revenue and NPV of its **first 12 months** (from its own month 0) and
+  `mediana_publica_acum12_usd`, the public median 12-month cumulative of oil and gas of its group at the average
+  price your well used (the public monthly series per well is not published, ADR-022, so this is a cumulative at an
+  average price, not a month-by-month valuation); the campaign summary totals and medians.
+
+Everything is **gross revenue**: no capex, opex, transport or taxes, and no royalties unless `regalia` (0.12 is
+the statutory base) is passed. With `modo = flat` the citation says the price is the user's, not public.
+
 ## The synthetic dataset
 
 `python pipeline.py sintetico [--n 30] [--semilla 7] [--salida DIR]` derives a "my wells" dataset from public
@@ -126,6 +145,8 @@ tool result. Never present it as real wells.
 
 - Comparisons are against **published** statistics: three quantiles per month and the in-scope well population.
   No per-well public monthly series is used, so the percentile is an interpolation (said above).
-- No unit conversion, no currency, no normalisation beyond per metre of lateral.
+- No unit conversion and no normalisation beyond per metre of lateral. Currency is opt-in: `valorizar` (below)
+  prices your volumes with the public tables; your file carries no province, so the price is Neuquén / Neuquina
+  unless `valorizar.region_petroleo` / `region_gas` says otherwise.
 - The user's outliers are not flagged; a well with a data error will look like a very good or very bad well.
 - One dataset per session; a second `cargar_mis_pozos` replaces the first.

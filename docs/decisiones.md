@@ -580,3 +580,64 @@ users can point `VMA_DATOS` at it without the portal; this phase does not create
 site's subset), a package pointed at downloaded tables. The cache holds only public data; the user's own files stay
 where they are (ADR-030). The snapshot download is one more network dependency, isolated behind an injectable
 opener and tested without network, and it is skipped whenever any local data exists.
+
+## ADR-034 · Prices: the realised crude price by province and the Res. 1/2018 gas price by basin, one table, gas converted at 9,300 kcal/m³ (2026-11-02)
+
+**Context.** F6 wants the type curves, the user's wells and the campaign simulator expressed in dollars. The portal
+has no per-well or per-operator price; what it has, catalogued opt-in in F5 (ADR-029), is the royalties report of
+crude (*Informe Regalías CRUDO.xlsx* in a ZIP: the average realised sale price in USD/m³ that each province reports
+to settle royalties, monthly since 1991, the last two months provisional) and the Res. 1/2018 gas prices (CSV,
+USD/MMBTU by basin, month, contract type and segment since 2019). The international and Escalante price datasets
+are stale (2016-2020). Volumes in the observatory are oil m³ and gas mil m³; the gas price is per MMBTU.
+
+**Decision.** Both sources become one published table, `precios` (`producto × region × mes × segmento × contrato`),
+with the price as published (`precio_dataset`, `unidad_dataset`) and converted to USD/m³ and USD per mil m³. The
+XLSX is read by content (the header row `AÑO | MES | provinces` is searched, not assumed), 0 is read as "nothing
+reported" and dropped, the last two reported months are flagged `provisorio`, and the production and royalties
+sheets come along as two extra columns because they share the grain. The gas conversion assumes the Argentine
+reference calorific value of **9,300 kcal/m³** (the base in which gas volumes are declared under Res. 319/93) and
+**1 MMBTU = 252,000 kcal**, so 1 mil m³ = 36.905 MMBTU (`vma/units.py`); richer gas is worth more per m³ than this
+says, and every USD block repeats it. The default gas price is the weighted average of all segments (`ppp`) under
+the `total` contract; the default regions are Neuquén (oil) and Neuquina (gas). The table is published by its own
+stage (`pipeline.py precios`) into the newest publication folder and as `site/data/precios.json` (oil from 2006,
+gas `total` only, like the ADR-023 cut); the data layer registers it as an optional fourth table that exists empty
+when a source lacks it, so tools say *sin dato porque* instead of failing, and the SQL allowlist includes it.
+`openpyxl` becomes a dependency.
+
+**Consequences.** Every USD figure in the observatory cites a public monthly price with its province or basin and
+its provisional flag. The realised crude price is a provincial average for royalties, not a contract price; the
+gas price is a basin average by segment; neither is per well, and the notes say so. The 9,300 kcal/m³ assumption,
+the `ppp × total` default and the Neuquén / Neuquina fallback are the three choices to revisit; all three are one
+constant each. Refreshing prices is a manual owner step (download the two opt-in sources, run the stage): the
+monthly workflow does not fetch them, so the committed snapshot can lag the portal by months and
+`ultimo_mes_publicado` says by how much.
+
+## ADR-035 · Valuation: gross revenue only, three price modes, a monthly NPV at 10 % by default, royalty optional, no costs (2026-11-02)
+
+**Context.** With prices in hand, the question is how far to go. An economic evaluation needs capex, opex,
+transport, taxes, export duties, price decks and the fiscal terms of each concession; none of that is public per
+well and most of it is the user's own. Going half-way (a guessed cost per barrel) would print numbers that look
+like economics and are not.
+
+**Decision.** `vma/precios/valorizar.py` computes **gross revenue** and nothing else: oil m³ and gas mil m³ per
+month × a price, summed, cumulated and discounted. Three price modes, chosen by the caller: `historico` (the
+published price of each calendar month in the well's province or basin, the last published price held beyond it and
+the months counted), `flat` (one price per product given by the user, accepted in USD/m³ or USD/bbl and USD per mil
+m³ or USD/MMBTU) and `ultimo` (the last published price held constant). The NPV discounts month k by
+`(1 + tasa_anual)^(-k/12)` with month 0 undiscounted and **10 % per year by default**, a usual real-dollar rate for
+ordering scenarios, documented as a default and not as advice. Royalties are **not** deducted unless the caller
+passes `regalia` (a fraction; 0.12 is the statutory base rate, effective rates differ by province and concession);
+`bruto_usd`, `regalia_usd` and `ingreso_usd` are returned apart. The block is attached to five tools through one
+optional parameter, `valorizar`, and without it the results are byte-for-byte what they were; it carries its own
+citation to the `precios` table (or `precio_flat (del usuario)`) and the caveats in `notas`. Each tool decides what
+it values: the type curve values both oil and gas P10/P50/P90 of the group (an envelope, not the same wells); my
+well values its real volumes and the type well in the same calendar months; the campaign values each well's first
+12 months and the public median acum12 at the average price used (no public monthly series per well, ADR-022); the
+forecast values the P50 path of the fitted fluid; the simulation values each quantile of the cumulative band.
+Bands are valued quantile by quantile at a fixed price: there is no price uncertainty.
+
+**Consequences.** Managers get an order of magnitude in dollars with the same citation discipline as the m³, and
+every block says in words that it is gross revenue with no costs. What is deliberately missing is listed in
+`docs/precios.md`; the user who has costs can subtract them from `ingreso_usd` knowing exactly what it contains.
+The defaults to revisit are the 10 % rate, the "mes0 = January of the cohort" convention for a type curve under
+the historical mode, and the Neuquén / Neuquina fallback for the user's own wells, which carry no province.

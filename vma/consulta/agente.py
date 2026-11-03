@@ -30,8 +30,8 @@ MAX_TURNOS = 12
 MAX_TOKENS = 16000
 
 SYSTEM = """Sos el asistente del observatorio abierto de Vaca Muerta: respondés preguntas sobre las tablas publicadas
-(pozos, indicadores, curvas_tipo) que salen de los datos públicos por pozo de la Secretaría de Energía de Argentina
-(Capítulo IV). Hablás en castellano rioplatense, técnico y directo, como un ingeniero de reservorios.
+(pozos, indicadores, curvas_tipo, precios) que salen de los datos públicos por pozo de la Secretaría de Energía de
+Argentina (Capítulo IV). Hablás en castellano rioplatense, técnico y directo, como un ingeniero de reservorios.
 
 Reglas, en orden de importancia:
 
@@ -52,6 +52,10 @@ Reglas, en orden de importancia:
    de una formación, `comparar_grupo` o `ranking` (filtrá por ventana para comparar pares); para la evolución
    mensual, `curva_tipo`; si no conocés una columna, `describir_tabla`; para fechar la respuesta, `metadatos`.
    Las operadoras son filas del dataset público y se tratan todas igual.
+7. **Plata.** `precios` da el precio público del crudo (USD/m³ por provincia) y del gas (USD/MMBTU por cuenca);
+   el parámetro `valorizar` de `curva_tipo`, `comparar_mi_pozo`, `comparar_mi_campania`, `pronosticar_pozo` y
+   `simular_campania` agrega el bloque `usd`. Siempre decís que es ingreso BRUTO (sin capex, opex ni impuestos;
+   regalías sólo si se pidió `regalia`), qué modo de precio y qué región se usó, y citás la tabla `precios`.
 
 Terminá con una línea "Datos: descargados el <fecha_datos>, maestro <version_maestro>, fuente <fuente>" tomada de
 cualquier resultado de herramienta."""
@@ -215,7 +219,21 @@ class ProveedorMock:
                 plan.append(("comparar_mi_pozo", {"sigla": mio.group(0).upper(), "mes_max": 12}))
             if plan:
                 return plan
-        if any(w in q for w in ("simul", "campaña de", "campania de")) and "simular_campania" in nombres:
+        # F6: money. "precio" alone asks the price table; "dólares/USD/VAN" on a curve or a campaign adds valorizar
+        usd = any(w in q for w in ("dólar", "dolar", "usd", "u$s", " van", "valoriz", "plata"))
+        valorizar = {"modo": "ultimo"}
+        if "regal" in q:
+            valorizar["regalia"] = 0.12
+        if (
+            "precio" in q
+            and "precios" in nombres
+            and not any(w in q for w in ("simul", "campaña", "campania", "curva", "pronóstic", "pronostic"))
+        ):
+            e = {"producto": "gas" if "gas" in q else "petroleo"}
+            if cohortes:
+                e["desde"] = f"{cohortes[0]}-01"
+            plan.append(("precios", e))
+        elif any(w in q for w in ("simul", "campaña de", "campania de")) and "simular_campania" in nombres:
             n = re.search(r"(\d{1,3})\s+pozos", q)
             e = {"formacion": formacion, "n_pozos": int(n.group(1)) if n else 10, "meses": 120, "n_sim": 300}
             if ventana:
@@ -225,6 +243,8 @@ class ProveedorMock:
             rama = re.search(r"(\d{3,4})\s*m\b", q)
             if rama:
                 e["rama_m"] = float(rama.group(1))
+            if usd:
+                e["valorizar"] = valorizar
             plan.append(("simular_campania", e))
         elif (
             sigla
@@ -241,7 +261,11 @@ class ProveedorMock:
             claves = {"cohorte": cohortes[0] if cohortes else 2022, "formacion": formacion}
             if ventana:
                 claves["ventana"] = ventana
-            plan.append(("curva_tipo", {"nivel": nivel, "claves": claves, "mes_max": 12}))
+            e = {"nivel": nivel, "claves": claves, "mes_max": 12}
+            if usd:
+                e["mes_max"] = 36
+                e["valorizar"] = valorizar
+            plan.append(("curva_tipo", e))
         elif any(w in q for w in ("ranking", "mejor", "peor", "ordena", "top")) and "ranking" in nombres:
             filtros: dict = {"formacion": formacion}
             if ventana:
@@ -330,6 +354,30 @@ class ProveedorMock:
             f"[{c.get('tabla')}: {', '.join(c.get('columnas', [])[:4])}{'; ' + filtros if filtros else ''}]"
         )
 
+    @staticmethod
+    def _usd(usd: dict | None, etiquetas: tuple[str, ...], horizonte: str) -> list[str]:
+        """The USD block of a result as lines, with its own citation (F6)."""
+        if not usd:
+            return []
+        if usd.get("sin_dato_porque"):
+            return [f"  USD: sin dato porque {usd['sin_dato_porque']}"]
+        c = usd.get("cita", {})
+        filtros = ", ".join(f"{k} = {v}" for k, v in c.get("filtros", {}).items())
+        out = []
+        for e in etiquetas:
+            t = (usd.get(e) or {}).get("total")
+            if not t:
+                continue
+            out.append(
+                f"  · USD {e} ({horizonte}, precio {usd.get('modo')}): ingreso {t.get('ingreso_usd')} USD"
+                f"{' (bruto ' + str(t.get('bruto_usd')) + ', regalía ' + str(t.get('regalia_usd')) + ')' if usd.get('regalia') else ' bruto'}, "
+                f"VAN {t.get('van_usd')} USD al {usd.get('tasa_anual')} anual [{c.get('tabla')}: {', '.join(c.get('columnas', [])[:3])}; {filtros}]"
+            )
+        notas = usd.get("notas") or []
+        if notas:
+            out.append(f"  Nota USD: {notas[0]}")
+        return out
+
     def _redactar(self, resultados: list[tuple[dict, dict]], inventar: bool) -> str:
         partes = [
             "(respuesta del proveedor mock: sin modelo, armada sólo con los resultados de las herramientas)"
@@ -374,6 +422,22 @@ class ProveedorMock:
                         f"  · mes {f.get('mes')}: P50 {f.get('p50')} (P10 {f.get('p10')}, P90 {f.get('p90')}), n = {f.get('n_pozos')}"
                         + (f" — {f['sin_dato_porque']}" if f.get("sin_dato_porque") else "")
                     )
+                partes += self._usd(d.get("usd"), ("p50", "p10", "p90"), f"{d.get('n_meses')} meses")
+            elif nombre == "precios":
+                rs = d.get("resumen", {})
+                partes.append(
+                    f"- Precio de {d.get('producto')} en {d.get('region')} ({d.get('segmento')}"
+                    f"{', ' + d['contrato'] if d.get('contrato') else ''}), {d.get('desde')} a {d.get('hasta')}: "
+                    f"último {rs.get('ultimo')} {d.get('unidad_dataset')} ({d.get('ultimo_mes_publicado')}), promedio {rs.get('promedio')}, "
+                    f"mín {rs.get('min')}, máx {rs.get('max')} {cita}"
+                )
+                for f in d.get("meses", [])[-3:]:
+                    partes.append(
+                        f"  · {f.get('mes')}: {f.get('precio_dataset')} {d.get('unidad_dataset')} = {f.get('precio_usd_mil_m3')} USD/mil m³"
+                        + (" (provisorio)" if f.get("provisorio") else "")
+                    )
+                if d.get("sin_dato_porque"):
+                    partes.append(f"  Sin dato porque: {d['sin_dato_porque']}")
             elif nombre == "buscar_pozo":
                 partes.append(f"- buscar_pozo: {d.get('n')} coincidencia(s) {cita}")
             elif nombre == "describir_tabla":
@@ -407,6 +471,7 @@ class ProveedorMock:
                     partes.append(
                         f"  · mes {f.get('mes')}: mío {f.get('mio')}, P50 {f.get('p50')}, percentil P{f.get('percentil')}"
                     )
+                partes += self._usd(d.get("usd"), ("mio", "grupo_p50"), f"{rs.get('n_meses_mios')} meses")
             elif nombre == "comparar_mi_campania":
                 rs = d.get("resumen", {})
                 partes.append(
@@ -451,6 +516,7 @@ class ProveedorMock:
                     f"P90 {f.get('acumulado_p90')} / P50 {f.get('acumulado_p50')} / P10 {f.get('acumulado_p10')} {d.get('unidad_volumen')}; "
                     f"por pozo P50 {f.get('por_pozo_p50')}; tasa pico P50 {f.get('tasa_pico_p50')} en el mes {f.get('mes_pico_p50')} {cita}"
                 )
+                partes += self._usd(d.get("usd"), ("p50", "p10", "p90"), f"{d.get('meses')} meses")
             else:
                 partes.append(f"- {nombre}: {json.dumps(d, ensure_ascii=False)[:400]} {cita}")
             for e in r.get("exclusiones", []):
