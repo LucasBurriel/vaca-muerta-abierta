@@ -26,8 +26,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from vma.consulta.datos import DOCS, NIVELES, TABLAS, Datos
+from vma.consulta.datos import DOCS, NIVELES, TODAS, Datos
 from vma.normalize import formation_key, operator_key, sigla_l2, sigla_l3, sigla_l4
+from vma.precios import (
+    CONTRATO_GAS_DEFAULT,
+    CONTRATOS_GAS,
+    REGION_GAS_DEFAULT,
+    REGION_PETROLEO_DEFAULT,
+    SEGMENTO_GAS_DEFAULT,
+    SEGMENTO_PETROLEO,
+    SEGMENTOS_GAS,
+    cuenca_gas_canonica,
+    provincia_canonica,
+)
+from vma.precios import valorizar as VZ
 from vma.propios import cargar as P
 from vma.propios import comparar as K
 from vma.simulacion import campania as SC
@@ -269,7 +281,12 @@ def _check_metrica(d: Datos, metrica: str) -> None:
 def metadatos(d: Datos) -> dict:
     """Qué datos hay: fecha de descarga, versión del maestro, fuente (parquet o json), tablas con filas y
     columnas, y los hashes SHA-256 del manifiesto de descarga. Llamar primero si hace falta fechar una respuesta."""
-    tablas = {t: {"filas": d.n_filas(t), "columnas": len(d.columnas(t)), "doc": DOCS[t]} for t in TABLAS}
+    tablas = {t: {"filas": d.n_filas(t), "columnas": len(d.columnas(t)), "doc": DOCS[t]} for t in TODAS}
+    if not d.tiene_precios():
+        tablas["precios"]["sin_dato_porque"] = (
+            "tabla precios vacía en esta fuente: corré `python pipeline.py download regalias_crudo precios_gas` y "
+            "`python pipeline.py precios` (docs/precios.md)"
+        )
     fuentes = [
         {k: s.get(k) for k in ("key", "file", "sha256", "ckan_last_modified", "license")}
         for s in d.meta.get("fuentes", [])
@@ -304,10 +321,10 @@ def metadatos(d: Datos) -> dict:
 
 
 def describir_tabla(d: Datos, tabla: str) -> dict:
-    """Columnas y tipos de una tabla publicada (pozos, indicadores, curvas_tipo), su cantidad de filas, y
+    """Columnas y tipos de una tabla publicada (pozos, indicadores, curvas_tipo, precios), su cantidad de filas, y
     la documentación donde está la regla de cada columna. Usar antes de pedir una métrica que no se conoce."""
-    if tabla not in TABLAS:
-        raise ErrorHerramienta(f"tabla {tabla!r} no existe; las tablas son {', '.join(TABLAS)}")
+    if tabla not in TODAS:
+        raise ErrorHerramienta(f"tabla {tabla!r} no existe; las tablas son {', '.join(TODAS)}")
     cols = d.columnas(tabla)
     datos = {
         "tabla": tabla,
@@ -321,7 +338,32 @@ def describir_tabla(d: Datos, tabla: str) -> dict:
     if tabla == "curvas_tipo":
         datos["niveles"] = list(NIVELES)
         datos["tasas"] = [t for t in TASAS if d.tiene("curvas_tipo", f"{t}_p50")]
+    if tabla == "precios":
+        datos["productos"] = {
+            "petroleo": {"segmentos": [SEGMENTO_PETROLEO], "unidad_dataset": "USD/m³", "region": "provincia"},
+            "gas": {
+                "segmentos": list(SEGMENTOS_GAS),
+                "contratos": list(CONTRATOS_GAS),
+                "unidad_dataset": "USD/MMBTU",
+                "region": "cuenca",
+            },
+        }
+        datos["regiones"] = {
+            p: [
+                r
+                for (r,) in d.con.execute(
+                    "SELECT DISTINCT region FROM precios WHERE producto = ? ORDER BY 1", [p]
+                ).fetchall()
+            ]
+            for p in ("petroleo", "gas")
+        }
+        if not d.tiene_precios():
+            datos["sin_dato_porque"] = (
+                "tabla vacía en esta fuente: python pipeline.py download regalias_crudo precios_gas && python pipeline.py precios"
+            )
     notas = [NOTA_DIAS]
+    if tabla == "precios" and d.fuente == "json":
+        notas.append("fuente json: petróleo desde 2006 y gas sólo contrato total (ADR-034)")
     if d.fuente == "json":
         notas.append("fuente json: sólo las columnas que usa el sitio; la lista de arriba es la disponible")
     return _envolver(
@@ -613,11 +655,15 @@ def curva_tipo(
     incluye_outliers: bool = True,
     tasa: str = "petroleo_m3_d",
     mes_max: int = 60,
+    valorizar: dict | None = None,
 ) -> dict:
     """Curva tipo publicada de un grupo: P10/P50/P90 (convención petrolera: P10 es el caso alto) de una tasa
     por mes desde la primera producción, con n_pozos por mes. nivel = cohorte_formacion |
     cohorte_formacion_ventana | cohorte_formacion_operadora; claves = {cohorte, formacion[, ventana | operadora]}.
-    Los meses con menos de 5 pozos vienen con estadísticos nulos y el motivo (ADR-017)."""
+    Los meses con menos de 5 pozos vienen con estadísticos nulos y el motivo (ADR-017). Con valorizar =
+    {modo: historico | flat | ultimo, precio_flat?, tasa_anual? (0.10), regalia? (0 u 0.12), mes0?, region_petroleo?,
+    region_gas?, uptime? (0.92)} agrega el bloque usd: ingreso bruto en USD por mes, acumulado y VAN de las curvas
+    P10/P50/P90 de petróleo y gas del grupo a precios públicos (tabla precios, docs/precios.md)."""
     if nivel not in NIVELES:
         raise ErrorHerramienta(f"nivel {nivel!r} no existe; los niveles son {', '.join(NIVELES)}")
     if tasa not in TASAS:
@@ -677,8 +723,41 @@ def curva_tipo(
         notas.append("ningún mes para ese grupo: la cohorte/formación/clave no tiene curva publicada")
     if d.fuente == "json" and mes_max > 60:
         notas.append("fuente json: la curva llega hasta el mes 60 (ADR-023)")
+    datos = {"tasa": tasa, "n_meses": len(filas), "meses": filas[: max(mes_max + 1, 1)]}
+    if valorizar is not None:
+        # the absolute oil and gas curves of the same group, whatever `tasa` was asked for
+        vcols = ", ".join(
+            f"{c}_{s}" for c in ("petroleo_m3_d", "gas_mil_m3_d") for s in ("p10", "p50", "p90")
+        )
+        vfilas = [
+            _fila(r)
+            for r in d.filas(
+                f"SELECT mes, {vcols} FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes", params
+            )
+        ]
+        uptime = float((valorizar or {}).get("uptime", 0.92))
+        series = {
+            est: _volumenes_curva(vfilas, uptime, ("petroleo_m3_d", "gas_mil_m3_d"), est)
+            for est in ("p10", "p50", "p90")
+        }
+        usd = _valorizacion(
+            d,
+            valorizar,
+            series=series,
+            mes0=f"{int(claves['cohorte']):04d}-01",
+            modo_default="ultimo",
+            notas_extra=[
+                f"volumen mensual = tasa por día efectivo × {VZ.DIAS_MES:.2f} d × uptime {uptime:g}",
+                "mes0 por defecto = enero de la cohorte (modo historico); los P10 de petróleo y de gas no son los mismos pozos: la banda USD es una envolvente",
+            ],
+        )
+        datos["usd"] = usd
+        if usd and "sin_dato_porque" in usd:
+            notas.append("usd: " + usd["sin_dato_porque"])
+        elif usd:
+            notas.append("usd: " + VZ.NOTA_BRUTO)
     return _envolver(
-        {"tasa": tasa, "n_meses": len(filas), "meses": filas[: max(mes_max + 1, 1)]},
+        datos,
         d=d,
         tabla="curvas_tipo",
         columnas=["mes", "n_pozos", "n_pozos_por_m", "publicable"] + [f"{tasa}_{s}" for s in estad],
@@ -796,13 +875,16 @@ def comparar_mi_pozo(
     cohorte_ref: int | None = None,
     incluye_outliers: bool = True,
     mes_max: int = 36,
+    valorizar: dict | None = None,
 ) -> dict:
     """Mi pozo contra la curva tipo publicada de su grupo (cohorte × formación × ventana si está publicada, si no
     cohorte × formación): mes a mes mi tasa, P10/P50/P90 del grupo, el percentil estimado (convención petrolera:
     P10 es el caso alto) y el cociente contra P50; además mi IP90, IP90 por metro y acumulado 12 meses contra la
     mediana del grupo público con el porcentaje de pozos que supero. tasa = petroleo_m3_d | gas_mil_m3_d |
     equivalente_m3_d (o _por_m con rama >= 500 m). cohorte_ref permite comparar contra otra cohorte. Requiere
-    cargar_mis_pozos antes."""
+    cargar_mis_pozos antes. Con valorizar = {modo: historico (por defecto, precio del mes calendario) | flat |
+    ultimo, precio_flat?, tasa_anual?, regalia?, region_petroleo?, region_gas?, uptime?} agrega el bloque usd:
+    mi ingreso bruto (petróleo + gas) por mes, acumulado y VAN, y el del pozo tipo P10/P50/P90 del grupo."""
     mis = _mis(d)
     try:
         r = K.comparar_pozo(
@@ -836,8 +918,15 @@ def comparar_mi_pozo(
         )
     if d.fuente == "json" and mes_max > 60:
         notas.append("fuente json: la curva llega hasta el mes 60 (ADR-023)")
+    r = _redondear(r)
+    if valorizar is not None:
+        r["usd"] = _usd_mi_pozo(d, mis, r, valorizar, int(mes_max))
+        if r["usd"] and "sin_dato_porque" in r["usd"]:
+            notas.append("usd: " + r["usd"]["sin_dato_porque"])
+        elif r["usd"]:
+            notas.append("usd: " + VZ.NOTA_BRUTO)
     return _envolver(
-        _redondear(r),
+        r,
         d=d,
         tabla="mis_produccion + mis_indicadores (sesión) × curvas_tipo + indicadores",
         columnas=["mes", "tef_d", tasa, f"{tasa}_p10", f"{tasa}_p50", f"{tasa}_p90", "ip90_*", "acum12_*"],
@@ -859,18 +948,73 @@ def comparar_mi_pozo(
     )
 
 
+def _mi_serie_volumenes(mis: P.MisPozos, sigla: str, mes_max: int) -> tuple[list, list, str | None, float]:
+    """(oil m³, gas mil m³ per month 0..mes_max, calendar month of month 0, observed uptime) of one of my wells."""
+    g = mis.produccion[(mis.produccion.sigla == sigla) & mis.produccion.k.notna() & (mis.produccion.k >= 0)]
+    g = g[g.k <= mes_max].sort_values("k")
+    if g.empty:
+        return [], [], None, 0.92
+    n = int(g.k.max()) + 1
+    petro: list = [None] * n
+    gas: list = [None] * n
+    for row in g.itertuples(index=False):
+        petro[int(row.k)] = float(row.petroleo_m3) if pd.notna(row.petroleo_m3) else None
+        gas[int(row.k)] = float(row.gas_mil_m3) if pd.notna(row.gas_mil_m3) else None
+    uptime = float(g.tef_d.sum() / g.dias_mes.sum()) if g.dias_mes.sum() else 0.92
+    return petro, gas, _mes_str(g.mes_fecha.iloc[0]), min(max(uptime, 0.05), 1.0)
+
+
+def _usd_mi_pozo(d: Datos, mis: P.MisPozos, r: dict, valorizar: dict, mes_max: int) -> dict | None:
+    """The ``usd`` block of comparar_mi_pozo: my actual volumes and the group's P10/P50/P90 type well."""
+    petro, gas, mes0, uptime_obs = _mi_serie_volumenes(mis, r["pozo"]["sigla"], mes_max)
+    if not petro and not gas:
+        return {"sin_dato_porque": "mi pozo no tiene meses con producción desde el mes 0"}
+    g = r["grupo"]
+    preds = ["nivel = ?", "cohorte = ?", "formacion = ?", "incluye_outliers = ?", "mes <= ?"]
+    params: list = [g["nivel"], int(g["cohorte"]), g["formacion"], bool(g["incluye_outliers"]), mes_max]
+    if g.get("ventana"):
+        preds.append("ventana = ?")
+        params.append(g["ventana"])
+    vcols = ", ".join(f"{c}_{s}" for c in ("petroleo_m3_d", "gas_mil_m3_d") for s in ("p10", "p50", "p90"))
+    vfilas = [
+        _fila(x)
+        for x in d.filas(
+            f"SELECT mes, {vcols} FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes", params
+        )
+    ]
+    uptime = float(valorizar.get("uptime", uptime_obs))
+    series: dict = {"mio": (petro, gas)}
+    for est in ("p10", "p50", "p90"):
+        series[f"grupo_{est}"] = _volumenes_curva(vfilas, uptime, ("petroleo_m3_d", "gas_mil_m3_d"), est)
+    return _valorizacion(
+        d,
+        valorizar,
+        series=series,
+        mes0=mes0,
+        modo_default="historico",
+        notas_extra=[
+            f"mio = mis volúmenes mensuales reales; grupo_p10/p50/p90 = tasa publicada × {VZ.DIAS_MES:.2f} d × uptime {uptime:.3f} ({'observado en mi pozo' if 'uptime' not in valorizar else 'dado'})",
+            f"mes0 = {mes0} (mi primer mes con producción); el grupo se valoriza en los mismos meses calendario",
+        ],
+    )
+
+
 def comparar_mi_campania(
     d: Datos,
     filtros: dict | None = None,
     metrica: str = "ip90_petroleo_m3_d_por_m",
     cohorte_ref: int | None = None,
     incluye_outliers: bool = True,
+    valorizar: dict | None = None,
 ) -> dict:
     """Mis pozos (filtros: campania, formacion, cohorte, ventana, siglas) contra sus grupos públicos, pozo por
     pozo: mi valor de la métrica, la mediana pública de su cohorte × formación × ventana, el cociente y el
     porcentaje de pozos públicos que supero; y el resumen de la campaña (mediana mía, mediana de medianas públicas,
     cuántos pozos superan la mediana pública, distribución de posiciones). Métricas: las de indicadores (ip*, acum*,
-    gor*, corte_agua*, rama_m, etapas, *_por_m). Requiere cargar_mis_pozos antes."""
+    gor*, corte_agua*, rama_m, etapas, *_por_m). Requiere cargar_mis_pozos antes. Con valorizar = {modo: historico
+    (por defecto) | flat | ultimo, precio_flat?, tasa_anual?, regalia?, region_petroleo?, region_gas?} agrega el
+    bloque usd: ingreso bruto de los primeros 12 meses de cada pozo mío (petróleo + gas) y su VAN, el total de la
+    campaña, y la mediana pública del acumulado 12 meses del grupo valorizada al mismo precio."""
     mis = _mis(d)
     try:
         r = K.comparar_campania(
@@ -897,8 +1041,15 @@ def comparar_mi_campania(
     if len(r["pozos"]) > MAX_FILAS:
         notas.append(f"se muestran {MAX_FILAS} de {len(r['pozos'])} pozos; filtrá por campaña o siglas")
         r["pozos"] = r["pozos"][:MAX_FILAS]
+    r = _redondear(r)
+    if valorizar is not None:
+        r["usd"] = _usd_mi_campania(d, mis, r, valorizar, cohorte_ref, incluye_outliers)
+        if r["usd"] and "sin_dato_porque" in r["usd"]:
+            notas.append("usd: " + r["usd"]["sin_dato_porque"])
+        elif r["usd"]:
+            notas.append("usd: " + VZ.NOTA_BRUTO)
     return _envolver(
-        _redondear(r),
+        r,
         d=d,
         tabla="mis_indicadores (sesión) × indicadores",
         columnas=[metrica, "cohorte", "formacion", "ventana", "en_alcance", "outlier_ip90_m"],
@@ -912,6 +1063,116 @@ def comparar_mi_campania(
         exclusiones=exclusiones,
         notas=notas,
     )
+
+
+MESES_USD_CAMPANIA = 12
+
+
+def _usd_mi_campania(
+    d: Datos, mis: P.MisPozos, r: dict, valorizar: dict, cohorte_ref: int | None, incluye_outliers: bool
+) -> dict | None:
+    """The ``usd`` block of comparar_mi_campania: each well's first 12 months in USD, the campaign total, and the
+    public median 12-month cumulative of each well's group valued at the same average price."""
+    pozos_usd = []
+    bloque: dict | None = None
+    for fila in r["pozos"]:
+        petro, gas, mes0, _ = _mi_serie_volumenes(mis, fila["sigla"], MESES_USD_CAMPANIA - 1)
+        if not petro and not gas:
+            pozos_usd.append({"sigla": fila["sigla"], "sin_dato_porque": "sin meses con producción"})
+            continue
+        b = _valorizacion(d, valorizar, series={"mio": (petro, gas)}, mes0=mes0, modo_default="historico")
+        if b is None or "sin_dato_porque" in b:
+            return b
+        bloque = b
+        mio = b["mio"]
+        p = {
+            "sigla": fila["sigla"],
+            "campania": fila.get("campania"),
+            "mes0": mes0,
+            "meses_valorizados": mio["total"]["meses"],
+            "ingreso_usd": mio["total"]["ingreso_usd"],
+            "bruto_usd": mio["total"]["bruto_usd"],
+            "van_usd": mio["total"]["van_usd"],
+        }
+        # the public median of acum12 oil and gas of the well's group, at the average price my months used
+        if fila.get("grupo") and d.tiene("indicadores", "acum12_petroleo_m3"):
+            nivel, resto = fila["grupo"].split(":", 1)
+            partes = resto.split("/")
+            preds = ["en_alcance", "cohorte = ?", "formacion = ?", "acum12_petroleo_m3 IS NOT NULL"]
+            params: list = [int(partes[0]), partes[1]]
+            if len(partes) > 2:
+                preds.append("ventana = ?")
+                params.append(partes[2])
+            if not incluye_outliers:
+                preds.append("NOT coalesce(outlier_ip90_m, false)")
+            gas_col = "median(acum12_gas_mil_m3)" if d.tiene("indicadores", "acum12_gas_mil_m3") else "NULL"
+            med = d.con.execute(
+                f"SELECT median(acum12_petroleo_m3), {gas_col}, count(*) FROM indicadores WHERE {' AND '.join(preds)}",
+                params,
+            ).fetchone()
+            pp = (
+                (mio["precios"]["petroleo"] or {}).get("promedio_usado")
+                or (mio["precios"]["petroleo"] or {}).get("ultimo_precio")
+                or (mio["precios"]["petroleo"] or {}).get("precio")
+            )
+            pg = (
+                (mio["precios"]["gas"] or {}).get("promedio_usado")
+                or (mio["precios"]["gas"] or {}).get("ultimo_precio")
+                or (mio["precios"]["gas"] or {}).get("precio")
+            )
+            if med and med[2] >= N_MIN and med[0] is not None and pp is not None:
+                pub = float(med[0]) * float(pp) + (
+                    float(med[1]) * float(pg) if (med[1] is not None and pg is not None) else 0.0
+                )
+                pub *= 1.0 - float(b["regalia"])
+                p["mediana_publica_acum12_usd"] = pub
+                p["n_publico"] = int(med[2])
+                p["ratio_vs_mediana_usd"] = p["ingreso_usd"] / pub if pub else None
+            else:
+                p["mediana_publica_acum12_usd"] = None
+                p["sin_dato_porque"] = (
+                    f"grupo público con menos de {N_MIN} pozos con acum12 (ADR-017)"
+                    if med and med[2] < N_MIN
+                    else "sin acum12 público o sin precio"
+                )
+        pozos_usd.append(p)
+    if bloque is None:
+        return {"sin_dato_porque": "ningún pozo mío tiene meses con producción"}
+    con = [p for p in pozos_usd if p.get("ingreso_usd") is not None]
+    ratios = [p["ratio_vs_mediana_usd"] for p in con if p.get("ratio_vs_mediana_usd") is not None]
+    out = {
+        "modo": bloque["modo"],
+        "tasa_anual": bloque["tasa_anual"],
+        "regalia": bloque["regalia"],
+        "meses_por_pozo": MESES_USD_CAMPANIA,
+        "pozos": pozos_usd,
+        "resumen": {
+            "n_pozos": len(con),
+            "ingreso_usd_total": sum(p["ingreso_usd"] for p in con),
+            "van_usd_total": sum(p["van_usd"] for p in con),
+            "mediana_ingreso_usd": float(np.median([p["ingreso_usd"] for p in con])) if con else None,
+            "mediana_publica_usd": float(
+                np.median(
+                    [
+                        p["mediana_publica_acum12_usd"]
+                        for p in con
+                        if p.get("mediana_publica_acum12_usd") is not None
+                    ]
+                )
+            )
+            if ratios
+            else None,
+            "ratio_mediano_usd": float(np.median(ratios)) if ratios else None,
+            "pozos_sobre_mediana_publica_usd": sum(1 for x in ratios if x > 1),
+        },
+        "cita": bloque["cita"],
+        "notas": bloque["notas"]
+        + [
+            f"cada pozo mío: ingreso de sus primeros {MESES_USD_CAMPANIA} meses (mes0 = su primer mes con producción); el VAN de cada pozo descuenta desde su propio mes 0",
+            "mediana_publica_acum12_usd = mediana del acum12 público de petróleo y gas del grupo × el precio promedio que usó mi pozo (la serie mensual pública no está publicada, ADR-022)",
+        ],
+    }
+    return _redondear(out)
 
 
 def brechas(
@@ -1162,6 +1423,7 @@ def pronosticar_pozo(
     d_min_anual: float = DC.D_MIN_ANUAL,
     q_min: float | None = None,
     uptime: float | None = None,
+    valorizar: dict | None = None,
 ) -> dict:
     """Ajusta la declinación de un pozo (público por sigla_clave, o mío con mio=true) con Arps exponencial,
     hiperbólico (con declinación terminal d_min_anual), armónico o Duong, elige por AIC si modelo=auto, y
@@ -1169,7 +1431,10 @@ def pronosticar_pozo(
     P10/P50/P90 del EUR por bootstrap de residuos (n_bootstrap réplicas). Usa la tasa por día efectivo, omite los
     primeros omitir_meses meses (limpieza), integra con el uptime observado (o el dado) y corta en q_min si se
     pasa. El pozo público necesita la fuente parquet y data/raw; si no, usar pronosticar_curva_tipo. No es
-    simulación de reservorio."""
+    simulación de reservorio. Con valorizar = {modo: historico (por defecto: historia a precio de cada mes, futuro
+    al último precio) | flat | ultimo, precio_flat?, tasa_anual?, regalia?, region_petroleo?, region_gas?} agrega
+    el bloque usd del pronóstico de la tasa pedida (petróleo o gas; equivalente no se valoriza): USD por mes,
+    acumulado y VAN."""
     _check_tasa_abs(tasa)
     if modelo not in MODELOS_TOOL:
         raise ErrorHerramienta(f"modelo debe ser uno de {', '.join(MODELOS_TOOL)}")
@@ -1234,8 +1499,37 @@ def pronosticar_pozo(
     notas.append(
         "la banda bootstrap mide la incertidumbre del ajuste a esta historia, no la de un cambio de régimen (interferencia, rebaje, cierre)"
     )
+    res = _redondear(res)
+    if valorizar is not None:
+        if tasa == "equivalente_m3_d":
+            raise ErrorHerramienta(
+                "valorizar: la tasa equivalente_m3_d no se valoriza; pedí petroleo_m3_d o gas_mil_m3_d"
+            )
+        vol = [float(v) for v in pr.volumen_mes]
+        series = {"pronostico": (vol, None) if tasa == "petroleo_m3_d" else (None, vol)}
+        provincia = cuenca = None
+        if not mio and d.tiene("pozos", "provincia"):
+            fila = d.filas("SELECT provincia, cuenca FROM pozos WHERE sigla_clave = ?", [meta["sigla_clave"]])
+            if fila:
+                provincia, cuenca = fila[0]["provincia"], fila[0]["cuenca"]
+        res["usd"] = _valorizacion(
+            d,
+            valorizar,
+            series=series,
+            mes0=_mes_str(serie.mes_fecha.iloc[0]) if "mes_fecha" in serie else None,
+            provincia=provincia,
+            cuenca=cuenca,
+            modo_default="historico",
+            notas_extra=[
+                f"pronostico = volumen mensual del pronóstico P50 ({tasa}): historia observada hasta el mes {int(serie.mes.max())}, después la curva ajustada × {VZ.DIAS_MES:.2f} d × uptime {up:.3f}; la banda bootstrap del EUR no se valoriza"
+            ],
+        )
+        if res["usd"] and "sin_dato_porque" in res["usd"]:
+            notas.append("usd: " + res["usd"]["sin_dato_porque"])
+        elif res["usd"]:
+            notas.append("usd: " + VZ.NOTA_BRUTO)
     return _envolver(
-        _redondear(res),
+        res,
         d=d,
         tabla="mis_produccion (sesión)" if mio else "pozos + data/raw produccion_nc",
         columnas=["mes", "tef_d", vol_col],
@@ -1371,13 +1665,17 @@ def simular_campania(
     semilla: int = 0,
     uptime: float = 0.92,
     incluye_outliers: bool = True,
+    valorizar: dict | None = None,
 ) -> dict:
     """Monte Carlo de una campaña de n_pozos pozos nuevos muestreados de la curva tipo publicada de formacion ×
     cohorte_ref (× ventana si se da): cada pozo simulado toma una posición en el grupo y su tasa mes a mes sale de
     los P10/P50/P90 publicados; si se pasa rama_m y el grupo tiene curva por metro, escala por la rama. Los pozos
     entran a ritmo_pozos_por_mes (por defecto todos en el mes 0). Devuelve por mes P10/P50/P90 y media de la tasa
     agregada y del acumulado, pozos en línea, y el acumulado final con banda. La banda es la dispersión publicada
-    entre pozos, nada más: sin interferencia, sin instalaciones, sin precio. No es simulación de reservorio."""
+    entre pozos, nada más: sin interferencia, sin instalaciones, sin precio salvo que se pida. No es simulación de
+    reservorio. Con valorizar = {modo: ultimo (por defecto: último precio publicado, constante) | flat | historico
+    (necesita mes0), precio_flat?, tasa_anual? (0.10), regalia?, mes0?, region_petroleo?, region_gas?} agrega el
+    bloque usd: ingreso bruto de la campaña en USD por mes, acumulado y VAN para las bandas P10/P50/P90."""
     _check_tasa_abs(tasa)
     f = _resolver_formacion(d, formacion)
     if f is None:
@@ -1460,9 +1758,31 @@ def simular_campania(
     exclusiones = (
         [] if incluye_outliers else ["pozos con outlier_ip90_m = True excluidos de la curva (ADR-018)"]
     )
-    # keep the envelope small: monthly bands at 3 significant digits already via _redondear; drop the mean series if long
+    r = _redondear(r)
+    if valorizar is not None:
+        if tasa == "equivalente_m3_d":
+            raise ErrorHerramienta(
+                "valorizar: la tasa equivalente_m3_d no se valoriza; pedí petroleo_m3_d o gas_mil_m3_d"
+            )
+        series = {}
+        for est in ("p10", "p50", "p90"):
+            vol = VZ.volumenes_desde_acumulado(r["acumulado"][est])
+            series[est] = (vol, None) if tasa == "petroleo_m3_d" else (None, vol)
+        r["usd"] = _valorizacion(
+            d,
+            valorizar,
+            series=series,
+            modo_default="ultimo",
+            notas_extra=[
+                f"p10/p50/p90 = la banda del acumulado de la campaña ({tasa}) convertida a volumen mensual; modo historico necesita valorizar.mes0 (mes calendario del mes 0 de la campaña)"
+            ],
+        )
+        if r["usd"] and "sin_dato_porque" in r["usd"]:
+            notas.append("usd: " + r["usd"]["sin_dato_porque"])
+        elif r["usd"]:
+            notas.append("usd: " + VZ.NOTA_BRUTO)
     return _envolver(
-        _redondear(r),
+        r,
         d=d,
         tabla="curvas_tipo",
         columnas=["mes", f"{col}_p10", f"{col}_p50", f"{col}_p90"],
@@ -1482,6 +1802,345 @@ def simular_campania(
         },
         regla_doc=f"{DOC_SIMULACION}#simular_campania; ADR-017, ADR-031",
         exclusiones=exclusiones,
+        notas=notas,
+    )
+
+
+# --- F6: public prices and the USD block (ADR-034, ADR-035) ---------------------------------------------------------
+
+DOC_PRECIOS = "docs/precios.md"
+MAX_MESES_PRECIOS = 240
+_VALORIZAR_CLAVES = (
+    "modo",
+    "precio_flat",
+    "tasa_anual",
+    "regalia",
+    "mes0",
+    "region_petroleo",
+    "region_gas",
+    "segmento_gas",
+    "contrato_gas",
+    "uptime",
+)
+_SIN_PRECIOS = (
+    "tabla precios vacía en esta fuente: corré `python pipeline.py download regalias_crudo precios_gas` y "
+    "`python pipeline.py precios`, o usá valorizar.modo = 'flat' con precio_flat (docs/precios.md)"
+)
+
+
+def _regiones_precios(d: Datos, producto: str) -> list[str]:
+    return [
+        r
+        for (r,) in d.con.execute(
+            "SELECT DISTINCT region FROM precios WHERE producto = ? ORDER BY 1", [producto]
+        ).fetchall()
+    ]
+
+
+def _serie_precio(
+    d: Datos, producto: str, region: str, segmento: str | None = None, contrato: str | None = None
+) -> VZ.SeriePrecio:
+    """The monthly price series of one product in one region from the ``precios`` table, in the volume unit."""
+    if producto == "petroleo":
+        segmento = segmento or SEGMENTO_PETROLEO
+        preds, params = ["producto = 'petroleo'", "region = ?", "segmento = ?"], [region, segmento]
+        col, unidad = "precio_usd_m3", "USD/m³"
+    else:
+        segmento = segmento or SEGMENTO_GAS_DEFAULT
+        contrato = contrato or CONTRATO_GAS_DEFAULT
+        preds, params = (
+            ["producto = 'gas'", "region = ?", "segmento = ?", "contrato = ?"],
+            [region, segmento, contrato],
+        )
+        col, unidad = "precio_usd_mil_m3", "USD/mil m³"
+    filas = d.filas(
+        f"SELECT anio, mes, {col} AS p, provisorio, fuente FROM precios WHERE {' AND '.join(preds)} AND {col} IS NOT NULL ORDER BY anio, mes",
+        params,
+    )
+    s = VZ.SeriePrecio(
+        producto,
+        region,
+        unidad,
+        {},
+        filas[0]["fuente"] if filas else "",
+        segmento,
+        contrato if producto == "gas" else None,
+    )
+    for f in filas:
+        k = f"{int(f['anio']):04d}-{int(f['mes']):02d}"
+        s.por_mes[k] = float(f["p"])
+        if f.get("provisorio"):
+            s.provisorios.add(k)
+    return s
+
+
+def _resolver_region(
+    d: Datos, producto: str, pedida: str | None, del_pozo: str | None, provincia: str | None = None
+) -> tuple[str, list[str]]:
+    """The table's region for a product: the one asked for, else the well's, else the default; with the reason."""
+    canon = (
+        provincia_canonica if producto == "petroleo" else (lambda c, p=provincia: cuenca_gas_canonica(c, p))
+    )
+    default = REGION_PETROLEO_DEFAULT if producto == "petroleo" else REGION_GAS_DEFAULT
+    nombre = "provincia" if producto == "petroleo" else "cuenca"
+    disponibles = _regiones_precios(d, producto)
+    notas: list[str] = []
+    if pedida:
+        r = canon(pedida)
+        if r is None or (disponibles and r not in disponibles):
+            raise ErrorHerramienta(
+                f"valorizar.region_{producto}: {pedida!r} no está en la tabla precios; las regiones de {producto} son {', '.join(disponibles) or '(tabla vacía)'}"
+            )
+        return r, notas
+    r = canon(del_pozo) if del_pozo else None
+    if r is not None and (not disponibles or r in disponibles):
+        return r, notas
+    if del_pozo:
+        notas.append(
+            f"{producto}: la {nombre} del pozo ({del_pozo}) no tiene precio publicado; se usa {default} (ADR-035)"
+        )
+    else:
+        notas.append(
+            f"{producto}: sin {nombre} conocida; se usa el precio de {default} (ADR-035); valorizar.region_{producto} lo cambia"
+        )
+    return default, notas
+
+
+def _valorizacion(
+    d: Datos,
+    params: dict | None,
+    *,
+    series: dict[str, tuple[list | None, list | None]],
+    mes0: str | None = None,
+    provincia: str | None = None,
+    cuenca: str | None = None,
+    modo_default: str = "ultimo",
+    notas_extra: list[str] | None = None,
+) -> dict | None:
+    """The ``usd`` block a tool attaches when it was called with ``valorizar``: one valuation per entry of
+    ``series`` (label -> (oil m³ per month, gas mil m³ per month)), the resolved regions and prices, a citation to
+    the ``precios`` table and the caveats. Never raises for a missing table (``sin_dato_porque`` instead); raises
+    :class:`ErrorHerramienta` when the request itself is wrong."""
+    if params is None:
+        return None
+    p = dict(params or {})
+    extra = set(p) - set(_VALORIZAR_CLAVES)
+    if extra:
+        raise ErrorHerramienta(
+            f"valorizar: claves desconocidas {sorted(extra)}; las válidas son {', '.join(_VALORIZAR_CLAVES)}"
+        )
+    modo = p.get("modo") or modo_default
+    if modo not in VZ.MODOS:
+        raise ErrorHerramienta(f"valorizar.modo debe ser uno de {', '.join(VZ.MODOS)}; recibí {modo!r}")
+    mes0 = VZ.validar_mes(p.get("mes0")) if p.get("mes0") else mes0
+    tasa = float(p.get("tasa_anual", VZ.TASA_ANUAL_DEFAULT))
+    regalia = float(p.get("regalia", 0.0))
+    notas = list(notas_extra or [])
+    hay_petro = any(v[0] is not None for v in series.values())
+    hay_gas = any(v[1] is not None for v in series.values())
+    sp = sg = None
+    cita_filtros: dict = {"modo": modo, "tasa_anual": tasa, "regalia": regalia, "mes0": mes0}
+    if modo != "flat":
+        if not d.tiene_precios():
+            return {"sin_dato_porque": _SIN_PRECIOS, "modo": modo}
+        if hay_petro:
+            region, n = _resolver_region(d, "petroleo", p.get("region_petroleo"), provincia)
+            notas += n
+            sp = _serie_precio(d, "petroleo", region)
+            cita_filtros["petroleo"] = {"region": region, "segmento": SEGMENTO_PETROLEO}
+        if hay_gas:
+            region, n = _resolver_region(d, "gas", p.get("region_gas"), cuenca, provincia)
+            notas += n
+            seg = p.get("segmento_gas") or SEGMENTO_GAS_DEFAULT
+            con = p.get("contrato_gas") or CONTRATO_GAS_DEFAULT
+            if seg not in SEGMENTOS_GAS or con not in CONTRATOS_GAS:
+                raise ErrorHerramienta(
+                    f"valorizar.segmento_gas ∈ {', '.join(SEGMENTOS_GAS)}; contrato_gas ∈ {', '.join(CONTRATOS_GAS)}"
+                )
+            sg = _serie_precio(d, "gas", region, seg, con)
+            cita_filtros["gas"] = {"region": region, "segmento": seg, "contrato": con}
+    else:
+        cita_filtros["precio_flat"] = p.get("precio_flat")
+    out: dict = {"modo": modo, "mes0": mes0, "tasa_anual": tasa, "regalia": regalia}
+    try:
+        for etiqueta, (petro, gas) in series.items():
+            out[etiqueta] = VZ.valorizar(
+                petro,
+                gas,
+                modo=modo,
+                precio_petroleo=sp,
+                precio_gas=sg,
+                mes0=mes0,
+                flat=p.get("precio_flat"),
+                tasa_anual=tasa,
+                regalia=regalia,
+                compacto=True,
+            )
+    except VZ.ErrorValorizacion as e:
+        raise ErrorHerramienta(f"valorizar: {e}") from e
+    primero = next(iter(series))
+    out["notas"] = notas + out[primero]["notas"]
+    for etiqueta in series:
+        out[etiqueta].pop("notas", None)  # the same caveats once, at the block level
+    out["cita"] = {
+        "tabla": "precios" if modo != "flat" else "precio_flat (del usuario)",
+        "columnas": ["producto", "region", "anio", "mes", "precio_usd_m3", "precio_usd_mil_m3", "provisorio"],
+        "filtros": {k: v for k, v in cita_filtros.items() if v is not None},
+        "regla_doc": f"{DOC_PRECIOS}; ADR-034, ADR-035",
+    }
+    return _redondear(out)
+
+
+def _volumenes_curva(
+    filas: list[dict], uptime: float, claves: tuple[str, str], est: str
+) -> tuple[list, list]:
+    """Oil and gas volumes per month from a type curve's rows (``<col>_<est>`` producing-day rates)."""
+    petro = VZ.volumenes_desde_tasas([f.get(f"{claves[0]}_{est}") for f in filas], uptime)
+    gas = VZ.volumenes_desde_tasas([f.get(f"{claves[1]}_{est}") for f in filas], uptime)
+    return petro, gas
+
+
+def _mes_str(ts: Any) -> str | None:
+    if ts is None or pd.isna(ts):
+        return None
+    return pd.Timestamp(ts).strftime("%Y-%m")
+
+
+def precios(
+    d: Datos,
+    producto: str,
+    region: str | None = None,
+    desde: str | None = None,
+    hasta: str | None = None,
+    segmento: str | None = None,
+    contrato: str | None = None,
+) -> dict:
+    """Precios públicos mensuales (tabla precios, docs/precios.md): petroleo = precio promedio realizado del crudo
+    en USD/m³ por provincia (regalías, Secretaría de Energía; región por defecto Neuquén); gas = USD/MMBTU por
+    cuenca, segmento (ppp por defecto: promedio ponderado; distribuidora, gnc, usina, industria, otros, expo) y
+    contrato (total por defecto; firme, interrumpible), con la conversión a USD por mil m³ a 9.300 kcal/m³
+    (región por defecto Neuquina). desde/hasta 'YYYY-MM' (por defecto los últimos 24 meses). Devuelve también las
+    regiones disponibles, el último mes publicado y si el precio es provisorio. Los precios son los que se pueden
+    citar para valorizar en dólares (parámetro valorizar de curva_tipo, comparar_mi_pozo, simular_campania…)."""
+    if producto not in ("petroleo", "gas"):
+        raise ErrorHerramienta("producto debe ser petroleo o gas")
+    if not d.tiene_precios():
+        return _envolver(
+            {"producto": producto, "meses": [], "sin_dato_porque": _SIN_PRECIOS},
+            d=d,
+            tabla="precios",
+            columnas=["producto", "region", "anio", "mes", "precio_dataset"],
+            filtros={"producto": producto},
+            regla_doc=f"{DOC_PRECIOS}; ADR-034",
+            notas=["la tabla precios no está publicada en esta fuente"],
+        )
+    region_c, notas_r = _resolver_region(d, producto, region, None)
+    if producto == "gas":
+        segmento = segmento or SEGMENTO_GAS_DEFAULT
+        contrato = contrato or CONTRATO_GAS_DEFAULT
+        if segmento not in SEGMENTOS_GAS:
+            raise ErrorHerramienta(f"segmento debe ser uno de {', '.join(SEGMENTOS_GAS)}")
+        if contrato not in CONTRATOS_GAS:
+            raise ErrorHerramienta(f"contrato debe ser uno de {', '.join(CONTRATOS_GAS)}")
+    else:
+        segmento = SEGMENTO_PETROLEO
+        contrato = None
+    desde = VZ.validar_mes(desde, "desde")
+    hasta = VZ.validar_mes(hasta, "hasta")
+    preds = ["producto = ?", "region = ?", "segmento = ?"]
+    params: list = [producto, region_c, segmento]
+    if contrato:
+        preds.append("contrato = ?")
+        params.append(contrato)
+    (ultimo,) = d.con.execute(
+        f"SELECT max(anio * 100 + mes) FROM precios WHERE {' AND '.join(preds)} AND precio_dataset IS NOT NULL",
+        params,
+    ).fetchone()
+    ultimo_mes = f"{ultimo // 100:04d}-{ultimo % 100:02d}" if ultimo else None
+    if hasta is None:
+        hasta = ultimo_mes or "9999-12"
+    if desde is None:
+        desde = VZ.mes_mas(hasta, -23) if hasta != "9999-12" else "0000-01"
+    preds.append("anio * 100 + mes BETWEEN ? AND ?")
+    params += [int(desde[:4]) * 100 + int(desde[5:]), int(hasta[:4]) * 100 + int(hasta[5:])]
+    filas = d.filas(
+        "SELECT anio, mes, precio_dataset, precio_usd_m3, precio_usd_mil_m3, provisorio, produccion_m3, regalias_usd "
+        f"FROM precios WHERE {' AND '.join(preds)} ORDER BY anio, mes",
+        params,
+    )
+    meses = []
+    for f in filas:
+        fila = {
+            "mes": f"{int(f['anio']):04d}-{int(f['mes']):02d}",
+            "precio_dataset": _sig(f["precio_dataset"]),
+            "precio_usd_m3": _sig(f["precio_usd_m3"]),
+            "precio_usd_mil_m3": _sig(f["precio_usd_mil_m3"]),
+            "provisorio": bool(f["provisorio"]),
+        }
+        if producto == "petroleo":
+            fila["produccion_m3"] = _sig(f["produccion_m3"])
+            fila["regalias_usd"] = _sig(f["regalias_usd"])
+        meses.append(fila)
+    cortado = len(meses) > MAX_MESES_PRECIOS
+    meses = meses[-MAX_MESES_PRECIOS:]
+    con_precio = [m["precio_dataset"] for m in meses if m["precio_dataset"] is not None]
+    datos = {
+        "producto": producto,
+        "region": region_c,
+        "segmento": segmento,
+        "contrato": contrato,
+        "unidad_dataset": "USD/m³" if producto == "petroleo" else "USD/MMBTU",
+        "desde": desde,
+        "hasta": hasta,
+        "ultimo_mes_publicado": ultimo_mes,
+        "n_meses": len(meses),
+        "resumen": {
+            "ultimo": con_precio[-1] if con_precio else None,
+            "promedio": _sig(sum(con_precio) / len(con_precio)) if con_precio else None,
+            "min": min(con_precio) if con_precio else None,
+            "max": max(con_precio) if con_precio else None,
+        },
+        "regiones_disponibles": _regiones_precios(d, producto),
+        "meses": meses,
+    }
+    if producto == "gas":
+        datos["mmbtu_por_mil_m3"] = _sig(VZ.units.MMBTU_PER_THOUSAND_M3)
+    notas = notas_r + [
+        "petróleo: precio promedio de venta realizado que informan las provincias para liquidar regalías (USD/m³); los dos últimos meses son provisorios"
+        if producto == "petroleo"
+        else VZ.NOTA_GAS + "; ppp = promedio ponderado de los segmentos; total = firme + interrumpible",
+    ]
+    if not meses:
+        notas.append("ningún mes con precio en ese rango y región")
+    if cortado:
+        notas.append(f"se muestran los últimos {MAX_MESES_PRECIOS} meses; acotá desde/hasta")
+    if d.fuente == "json":
+        notas.append("fuente json: petróleo desde 2006 y gas sólo contrato total (ADR-034)")
+    return _envolver(
+        datos,
+        d=d,
+        tabla="precios",
+        columnas=[
+            "producto",
+            "region",
+            "segmento",
+            "contrato",
+            "anio",
+            "mes",
+            "precio_dataset",
+            "precio_usd_m3",
+            "precio_usd_mil_m3",
+            "provisorio",
+        ],
+        filtros={
+            "producto": producto,
+            "region": region_c,
+            "segmento": segmento,
+            "contrato": contrato,
+            "desde": desde,
+            "hasta": hasta,
+        },
+        regla_doc=f"{DOC_PRECIOS}; ADR-034",
         notas=notas,
     )
 
@@ -1509,10 +2168,10 @@ def sql_solo_lectura(d: Datos, sql: str, limite: int = SQL_LIMIT) -> dict:
         raise ErrorHerramienta("la consulta usa una palabra o símbolo fuera de la allowlist de sólo lectura")
     refs = {t.lower() for t in _TABLA_REF.findall(s)}
     ctes = {m.lower() for m in re.findall(r"\b(\w+)\s+as\s*\(", s, re.IGNORECASE)}
-    fuera = refs - set(TABLAS) - ctes
+    fuera = refs - set(TODAS) - ctes
     if fuera:
         raise ErrorHerramienta(
-            f"tablas fuera de la allowlist: {', '.join(sorted(fuera))}; permitidas: {', '.join(TABLAS)}"
+            f"tablas fuera de la allowlist: {', '.join(sorted(fuera))}; permitidas: {', '.join(TODAS)}"
         )
     limite = max(1, min(int(limite), SQL_LIMIT))
     envuelto = f"SELECT * FROM ({s}) AS _q LIMIT {limite + 1}"
@@ -1578,11 +2237,51 @@ def _schema(props: dict, required: list[str]) -> dict:
     return {"type": "object", "properties": props, "required": required, "additionalProperties": False}
 
 
+_NUM = {"type": "number"}
+_VALORIZAR_SCHEMA = {
+    "type": "object",
+    "description": (
+        "F6: agrega el bloque usd (ingreso bruto por mes, acumulado y VAN a precios públicos, docs/precios.md). "
+        "modo: historico (precio del mes calendario) | flat (precio_flat) | ultimo (último publicado)"
+    ),
+    "properties": {
+        "modo": {"type": "string", "enum": list(VZ.MODOS)},
+        "precio_flat": {
+            "type": "object",
+            "properties": {
+                "petroleo_usd_m3": _NUM,
+                "petroleo_usd_bbl": _NUM,
+                "gas_usd_mil_m3": _NUM,
+                "gas_usd_mmbtu": _NUM,
+            },
+            "additionalProperties": False,
+        },
+        "tasa_anual": {"type": "number", "description": "tasa de descuento anual, fracción (0.10)"},
+        "regalia": {
+            "type": "number",
+            "description": "fracción a restar del bruto (0; 0.12 es la alícuota base)",
+        },
+        "mes0": {"type": "string", "description": "YYYY-MM del mes 0 (modo historico)"},
+        "region_petroleo": {
+            "type": "string",
+            "description": "provincia de la tabla precios (Neuquén por defecto)",
+        },
+        "region_gas": {"type": "string", "description": "cuenca de la tabla precios (Neuquina por defecto)"},
+        "segmento_gas": {"type": "string", "enum": list(SEGMENTOS_GAS)},
+        "contrato_gas": {"type": "string", "enum": list(CONTRATOS_GAS)},
+        "uptime": {
+            "type": "number",
+            "description": "días efectivos / calendario para convertir tasas de curva a volumen (0.92)",
+        },
+    },
+    "additionalProperties": False,
+}
+
 HERRAMIENTAS: dict[str, dict] = {
     "metadatos": {"fn": metadatos, "schema": _schema({}, [])},
     "describir_tabla": {
         "fn": describir_tabla,
-        "schema": _schema({"tabla": {"type": "string", "enum": list(TABLAS)}}, ["tabla"]),
+        "schema": _schema({"tabla": {"type": "string", "enum": list(TODAS)}}, ["tabla"]),
     },
     "buscar_pozo": {
         "fn": buscar_pozo,
@@ -1633,8 +2332,26 @@ HERRAMIENTAS: dict[str, dict] = {
                 "incluye_outliers": _BOOL,
                 "tasa": {"type": "string", "enum": list(TASAS)},
                 "mes_max": _INT,
+                "valorizar": _VALORIZAR_SCHEMA,
             },
             ["nivel", "claves"],
+        ),
+    },
+    "precios": {
+        "fn": precios,
+        "schema": _schema(
+            {
+                "producto": {"type": "string", "enum": ["petroleo", "gas"]},
+                "region": {
+                    "type": "string",
+                    "description": "provincia (petróleo) o cuenca (gas) de la tabla precios",
+                },
+                "desde": {"type": "string", "description": "YYYY-MM"},
+                "hasta": {"type": "string", "description": "YYYY-MM"},
+                "segmento": {"type": "string", "enum": list(SEGMENTOS_GAS)},
+                "contrato": {"type": "string", "enum": list(CONTRATOS_GAS)},
+            },
+            ["producto"],
         ),
     },
 }
@@ -1677,6 +2394,7 @@ HERRAMIENTAS.update(
                     "cohorte_ref": _INT,
                     "incluye_outliers": _BOOL,
                     "mes_max": _INT,
+                    "valorizar": _VALORIZAR_SCHEMA,
                 },
                 ["sigla"],
             ),
@@ -1689,6 +2407,7 @@ HERRAMIENTAS.update(
                     "metrica": {"type": "string", "enum": sorted(METRICAS)},
                     "cohorte_ref": _INT,
                     "incluye_outliers": _BOOL,
+                    "valorizar": _VALORIZAR_SCHEMA,
                 },
                 [],
             ),
@@ -1722,7 +2441,6 @@ HERRAMIENTAS.update(
         },
     }
 )
-_NUM = {"type": "number"}
 _TASA_ABS = {"type": "string", "enum": ["petroleo_m3_d", "gas_mil_m3_d", "equivalente_m3_d"]}
 HERRAMIENTAS.update(
     {
@@ -1740,6 +2458,7 @@ HERRAMIENTAS.update(
                     "d_min_anual": _NUM,
                     "q_min": _NUM,
                     "uptime": _NUM,
+                    "valorizar": _VALORIZAR_SCHEMA,
                 },
                 ["sigla"],
             ),
@@ -1788,6 +2507,7 @@ HERRAMIENTAS.update(
                     "semilla": _INT,
                     "uptime": _NUM,
                     "incluye_outliers": _BOOL,
+                    "valorizar": _VALORIZAR_SCHEMA,
                 },
                 ["formacion", "n_pozos"],
             ),

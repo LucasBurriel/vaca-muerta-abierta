@@ -443,6 +443,8 @@ def test_every_tool_result_carries_a_citation(d):
             {"nivel": "cohorte_formacion", "claves": {"cohorte": 2024, "formacion": "Vaca Muerta"}},
         ),
         ("simular_campania", {"formacion": "Vaca Muerta", "n_pozos": 3, "meses": 12, "n_sim": 20}),
+        # F6: public prices (ADR-034); this fake repo has no precios table, so the tool answers sin_dato_porque
+        ("precios", {"producto": "petroleo"}),
     ]
     assert {n for n, _ in llamadas} == set(H.HERRAMIENTAS)
     for nombre, entrada in llamadas:

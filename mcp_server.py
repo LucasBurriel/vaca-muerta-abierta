@@ -45,7 +45,10 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
             "Datos públicos por pozo de Vaca Muerta (Secretaría de Energía, Capítulo IV), limpios y con linaje. "
             "Herramientas de solo lectura; cada resultado trae su cita (tabla, columnas, filtros, regla). "
             "Sin cita no hay número; cuando un indicador es nulo, 'sin_dato_porque' dice el motivo. "
-            f"Fuente: {d.fuente}, descargada {d.fecha_descarga}, maestro {d.version_maestro}."
+            f"Fuente: {d.fuente}, descargada {d.fecha_descarga}, maestro {d.version_maestro}. "
+            "La tool precios da los precios públicos (crudo USD/m³ por provincia, gas USD/MMBTU por cuenca) y el "
+            "parámetro valorizar de curva_tipo, comparar_mi_pozo, comparar_mi_campania, pronosticar_pozo y "
+            "simular_campania agrega el bloque usd (ingreso bruto por mes, acumulado y VAN; sin costos)."
         ),
     )
 
@@ -127,6 +130,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
         incluye_outliers: bool = True,
         tasa: str = "petroleo_m3_d",
         mes_max: int = 60,
+        valorizar: dict | None = None,
     ) -> str:
         return _correr(
             "curva_tipo",
@@ -135,6 +139,28 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
             incluye_outliers=incluye_outliers,
             tasa=tasa,
             mes_max=mes_max,
+            valorizar=valorizar,
+        )
+
+    # --- F6: public prices (ADR-034); `valorizar` on the tools above and below adds the USD block (ADR-035) -------
+
+    @mcp.tool(description=H.descripcion("precios"))
+    def precios(
+        producto: str,
+        region: str | None = None,
+        desde: str | None = None,
+        hasta: str | None = None,
+        segmento: str | None = None,
+        contrato: str | None = None,
+    ) -> str:
+        return _correr(
+            "precios",
+            producto=producto,
+            region=region,
+            desde=desde,
+            hasta=hasta,
+            segmento=segmento,
+            contrato=contrato,
         )
 
     # --- F5: the user's own wells (ADR-030); data stays in this process ---------------------------------------
@@ -150,6 +176,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
         cohorte_ref: int | None = None,
         incluye_outliers: bool = True,
         mes_max: int = 36,
+        valorizar: dict | None = None,
     ) -> str:
         return _correr(
             "comparar_mi_pozo",
@@ -158,6 +185,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
             cohorte_ref=cohorte_ref,
             incluye_outliers=incluye_outliers,
             mes_max=mes_max,
+            valorizar=valorizar,
         )
 
     @mcp.tool(description=H.descripcion("comparar_mi_campania"), meta=_meta("comparar_mi_campania"))
@@ -166,6 +194,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
         metrica: str = "ip90_petroleo_m3_d_por_m",
         cohorte_ref: int | None = None,
         incluye_outliers: bool = True,
+        valorizar: dict | None = None,
     ) -> str:
         return _correr(
             "comparar_mi_campania",
@@ -173,6 +202,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
             metrica=metrica,
             cohorte_ref=cohorte_ref,
             incluye_outliers=incluye_outliers,
+            valorizar=valorizar,
         )
 
     @mcp.tool(description=H.descripcion("vecinos_de_mis_pozos"), meta=_meta("vecinos_de_mis_pozos"))
@@ -225,6 +255,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
         d_min_anual: float = 0.06,
         q_min: float | None = None,
         uptime: float | None = None,
+        valorizar: dict | None = None,
     ) -> str:
         return _correr(
             "pronosticar_pozo",
@@ -238,6 +269,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
             d_min_anual=d_min_anual,
             q_min=q_min,
             uptime=uptime,
+            valorizar=valorizar,
         )
 
     @mcp.tool(description=H.descripcion("pronosticar_curva_tipo"))
@@ -281,6 +313,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
         semilla: int = 0,
         uptime: float = 0.92,
         incluye_outliers: bool = True,
+        valorizar: dict | None = None,
     ) -> str:
         return _correr(
             "simular_campania",
@@ -296,6 +329,7 @@ def construir(d: D.Datos, con_sql: bool, con_apps: bool = True):
             semilla=semilla,
             uptime=uptime,
             incluye_outliers=incluye_outliers,
+            valorizar=valorizar,
         )
 
     if con_sql:
