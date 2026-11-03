@@ -11,7 +11,7 @@
 <body>
 <h1 id="titulo">Simulador de campaña</h1>
 <p class="sub" id="sub">Esperando el resultado de <code>simular_campania</code>…</p>
-<div class="aviso">Análisis de curvas de declinación sobre datos públicos, no simulación de reservorio: la banda es la dispersión publicada entre pozos, sin interferencia, instalaciones ni precio (<code>docs/simulacion.md</code>).</div>
+<div class="aviso">Análisis de curvas de declinación sobre datos públicos, no simulación de reservorio: la banda es la dispersión publicada entre pozos, sin interferencia ni instalaciones (<code>docs/simulacion.md</code>). En dólares es ingreso <b>bruto</b> a precios públicos: sin capex, opex ni impuestos (<code>docs/precios.md</code>).</div>
 <form class="controles" id="form" onsubmit="return false">
   <div><label>pozos</label><input type="number" id="n_pozos" min="1" max="500" step="1"></div>
   <div><label>meses</label><input type="number" id="meses" min="12" max="360" step="12"></div>
@@ -20,9 +20,20 @@
   <div><label>uptime</label><input type="number" id="uptime" min="0.5" max="1" step="0.01"></div>
   <div><label>ventana</label><select id="ventana"><option value="">(todas)</option><option value="petroleo">petróleo</option><option value="volatil_condensado">volátil / condensado</option><option value="gas">gas</option></select></div>
   <div><label>cohorte ref.</label><input type="number" id="cohorte_ref" min="2010" max="2030" step="1"></div>
+  <div><label>precio</label><select id="modo"><option value="">sin valorizar</option><option value="ultimo">último publicado</option><option value="flat">flat</option><option value="historico">histórico desde mes0</option></select></div>
+  <div><label id="flat_label">precio flat (USD/bbl)</label><input type="number" id="precio_flat" min="0" step="1" placeholder="p. ej. 65"></div>
+  <div><label>mes0 (YYYY-MM)</label><input type="text" id="mes0" placeholder="2024-01" pattern="\d{4}-\d{2}"></div>
+  <div><label>tasa anual (%)</label><input type="number" id="tasa" min="0" max="50" step="0.5" value="10"></div>
+  <div><label>regalía (%)</label><input type="number" id="regalia" min="0" max="50" step="1" value="0"></div>
   <div><button id="correr">Volver a simular</button></div>
 </form>
 <div class="fila" id="tarjetas"></div>
+<div class="barra">
+  <div class="conmutador" id="unidad" hidden>
+    <button type="button" data-u="tasa" class="activo">m³/d</button><button type="button" data-u="usd">USD/mes</button>
+  </div>
+  <span class="nota" id="usd_sub"></span>
+</div>
 <div id="g_tasa" class="grafico"></div>
 <div id="g_acum" class="grafico" style="height:260px"></div>
 <p class="nota" id="notas"></p>
@@ -30,12 +41,23 @@
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  let c1 = null, c2 = null, args = {};
+  let c1 = null, c2 = null, args = {}, unidad = "tasa";
   function tarjeta(k, v) { return `<div class="tarjeta"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
+  const fmtUsd = (x) => (x === null || x === undefined) ? "–" : "US$ " + VMA.fmt(x, 3);
+  const usdOk = (d) => d && d.usd && !d.usd.sin_dato_porque && d.usd.p50 && d.usd.p50.series;
+  function esGas() { return (args.tasa || "petroleo_m3_d") === "gas_mil_m3_d"; }
   function llenar(a) {
     args = Object.assign({}, args, a || {});
     $("n_pozos").value = args.n_pozos ?? 10; $("meses").value = args.meses ?? 120; $("rama_m").value = args.rama_m ?? "";
     $("ritmo").value = args.ritmo_pozos_por_mes ?? ""; $("uptime").value = args.uptime ?? 0.92; $("ventana").value = args.ventana ?? ""; $("cohorte_ref").value = args.cohorte_ref ?? "";
+    const v = args.valorizar || {};
+    $("modo").value = v.modo || (args.valorizar ? "ultimo" : "");
+    const pf = v.precio_flat || {};
+    $("precio_flat").value = pf.petroleo_usd_bbl ?? pf.gas_usd_mmbtu ?? "";
+    $("mes0").value = v.mes0 || "";
+    if (v.tasa_anual !== undefined) $("tasa").value = Math.round(v.tasa_anual * 1000) / 10;
+    if (v.regalia !== undefined) $("regalia").value = Math.round(v.regalia * 1000) / 10;
+    $("flat_label").textContent = esGas() ? "precio flat (USD/MMBTU)" : "precio flat (USD/bbl)";
   }
   function banda(xs, b, color, nombre) {
     return [
@@ -44,6 +66,10 @@
       { name: nombre + " P50", type: "line", data: b.p50.map((v, i) => [xs[i], v]), showSymbol: false, lineStyle: { width: 2.5, color }, itemStyle: { color } },
     ];
   }
+  function bandaUsd(u, clave) {
+    const s = (q) => (u[q] && u[q].series ? u[q].series[clave].map((v) => v ?? 0) : []);
+    return { p10: s("p10"), p50: s("p50"), p90: s("p90") };
+  }
   function render(env) {
     if (!env || env.error) { $("sub").textContent = "Error: " + ((env && env.error) || "sin datos"); $("correr").disabled = false; return; }
     const d = env.datos, g = d.grupo, f = d.final;
@@ -51,38 +77,77 @@
     $("titulo").textContent = `Campaña de ${d.n_pozos} pozos · ${g.formacion}${g.ventana ? " · " + g.ventana : ""} · curva ${g.cohorte_ref}`;
     $("sub").innerHTML = `<code>${g.curva}</code> · ${d.n_sim} corridas · ${d.meses_curva_publicados} meses publicados${d.meses_extrapolados ? " + " + d.meses_extrapolados + " extrapolados" : ""}${d.escala_por_metro ? " · escala por rama " + VMA.fmt(d.rama_m) + " m" : ""}`;
     const u = d.unidad_volumen;
-    $("tarjetas").innerHTML =
+    const hayUsd = usdOk(d);
+    let t =
       tarjeta(`acumulado ${d.meses} m · P50`, `${VMA.fmt(f.acumulado_p50, 3)} ${u}`) +
       tarjeta("P10 / P90", `${VMA.fmt(f.acumulado_p10, 3)} / ${VMA.fmt(f.acumulado_p90, 3)}`) +
       tarjeta("por pozo P50", `${VMA.fmt(f.por_pozo_p50, 3)} ${u}`) +
       tarjeta("tasa pico P50", `${VMA.fmt(f.tasa_pico_p50, 3)} ${d.tasa.replace("_d", "/d").replace("_m3", " m³").replace("_mil", " mil")} (mes ${f.mes_pico_p50})`);
+    if (hayUsd) {
+      const v = d.usd, t50 = v.p50.total, t10 = (v.p10 || {}).total || {}, t90 = (v.p90 || {}).total || {};
+      t += tarjeta(`VAN P50 · ${Math.round(v.tasa_anual * 100)} % anual`, `${fmtUsd(t50.van_usd)} <span class="k">P10 ${fmtUsd(t10.van_usd)} · P90 ${fmtUsd(t90.van_usd)}</span>`);
+      t += tarjeta(`ingreso ${v.regalia ? "neto de regalía " + Math.round(v.regalia * 100) + " %" : "bruto"} P50`, `${fmtUsd(t50.ingreso_usd)} <span class="k">precio ${v.modo}${v.mes0 ? " desde " + v.mes0 : ""}</span>`);
+    } else if (d.usd && d.usd.sin_dato_porque) {
+      t += tarjeta("USD", `<span class="k">${d.usd.sin_dato_porque}</span>`);
+    }
+    $("tarjetas").innerHTML = t;
+    $("unidad").hidden = !hayUsd;
+    if (!hayUsd) unidad = "tasa";
+    for (const b of $("unidad").querySelectorAll("button")) b.classList.toggle("activo", b.dataset.u === unidad);
+    const esUsd = unidad === "usd" && hayUsd;
+    let p = "";
+    if (hayUsd) {
+      const pr = d.usd.p50.precios || {}; const pp = pr.petroleo || pr.gas || {};
+      p = pp.region ? `${pp.region} · ${pp.segmento || ""}${pp.contrato ? " " + pp.contrato : ""} · último ${VMA.fmt(pp.ultimo_precio, 4)} ${pp.unidad} (${pp.ultimo_mes_publicado})` : (pp.precio !== undefined ? `flat ${VMA.fmt(pp.precio, 4)} ${pp.unidad}` : "");
+    }
+    $("usd_sub").textContent = p;
     const xs = d.mes;
     const dark = (VMA.ctx.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
     c1 = c1 || echarts.init($("g_tasa"), dark ? "dark" : null);
     c2 = c2 || echarts.init($("g_acum"), dark ? "dark" : null);
-    const base = { backgroundColor: "transparent", animation: false, grid: { left: 70, right: 20, top: 30, bottom: 36 }, tooltip: { trigger: "axis", valueFormatter: (v) => VMA.fmt(v, 3) }, xAxis: { type: "value", name: "mes de campaña", nameLocation: "middle", nameGap: 24, min: 0, max: d.meses - 1 } };
-    c1.setOption(Object.assign({}, base, { legend: { top: 0, data: ["tasa agregada P50", "tasa agregada P10–P90"] }, yAxis: { type: "value", name: d.tasa }, series: banda(xs, d.tasa_agregada, "#b5451b", "tasa agregada") }), true);
-    c2.setOption(Object.assign({}, base, { legend: { top: 0, data: ["acumulado P50", "acumulado P10–P90"] }, yAxis: { type: "value", name: u }, series: banda(xs, d.acumulado, "#1f6fb2", "acumulado").concat([{ name: "pozos en línea", type: "line", yAxisIndex: 0, data: [], showSymbol: false }]) }), true);
-    $("notas").innerHTML = (env.notas || []).map((n) => "· " + n).join("<br>");
+    const base = { backgroundColor: "transparent", animation: false, grid: { left: esUsd ? 90 : 70, right: 20, top: 30, bottom: 36 }, tooltip: { trigger: "axis", valueFormatter: (v) => (esUsd ? fmtUsd(v) : VMA.fmt(v, 3)) }, xAxis: { type: "value", name: "mes de campaña", nameLocation: "middle", nameGap: 24, min: 0, max: d.meses - 1 } };
+    const ejeUsd = (n) => ({ type: "value", name: n, axisLabel: { formatter: (v) => VMA.fmt(v, 2) } });
+    if (esUsd) {
+      c1.setOption(Object.assign({}, base, { legend: { top: 0, data: ["ingreso USD/mes P50", "ingreso USD/mes P10–P90"] }, yAxis: ejeUsd("USD/mes"), series: banda(xs, bandaUsd(d.usd, "ingreso_usd"), "#2f7a4a", "ingreso USD/mes") }), true);
+      c2.setOption(Object.assign({}, base, { legend: { top: 0, data: ["acumulado USD P50", "acumulado USD P10–P90"] }, yAxis: ejeUsd("USD acumulado"), series: banda(xs, bandaUsd(d.usd, "acumulado_usd"), "#1f6fb2", "acumulado USD") }), true);
+    } else {
+      c1.setOption(Object.assign({}, base, { legend: { top: 0, data: ["tasa agregada P50", "tasa agregada P10–P90"] }, yAxis: { type: "value", name: d.tasa }, series: banda(xs, d.tasa_agregada, "#b5451b", "tasa agregada") }), true);
+      c2.setOption(Object.assign({}, base, { legend: { top: 0, data: ["acumulado P50", "acumulado P10–P90"] }, yAxis: { type: "value", name: u }, series: banda(xs, d.acumulado, "#1f6fb2", "acumulado").concat([{ name: "pozos en línea", type: "line", yAxisIndex: 0, data: [], showSymbol: false }]) }), true);
+    }
+    const notas = (env.notas || []).concat(hayUsd ? (d.usd.notas || []).map((n) => "USD: " + n) : []);
+    $("notas").innerHTML = notas.map((n) => "· " + n).join("<br>");
     const c = env.cita || {};
-    $("cita").innerHTML = `Cita: <code>${c.tabla}</code> · filtros ${JSON.stringify(c.filtros)} · ${c.regla_doc} · datos ${env.fecha_datos}, maestro ${env.version_maestro}, fuente ${env.fuente}`;
+    let cita = `Cita: <code>${c.tabla}</code> · filtros ${JSON.stringify(c.filtros)} · ${c.regla_doc} · datos ${env.fecha_datos}, maestro ${env.version_maestro}, fuente ${env.fuente}`;
+    if (hayUsd && d.usd.cita) cita += `<br>Precios: <code>${d.usd.cita.tabla}</code> · ${JSON.stringify(d.usd.cita.filtros)} · ${d.usd.cita.regla_doc}`;
+    $("cita").innerHTML = cita;
     $("correr").disabled = false;
+  }
+  function valorizarDesdeForm() {
+    const modo = $("modo").value;
+    if (!modo) return null;
+    const v = { modo, tasa_anual: (+$("tasa").value || 0) / 100, regalia: (+$("regalia").value || 0) / 100 };
+    if (modo === "flat" && $("precio_flat").value) v.precio_flat = esGas() ? { gas_usd_mmbtu: +$("precio_flat").value } : { petroleo_usd_bbl: +$("precio_flat").value };
+    if (modo === "historico" && $("mes0").value) v.mes0 = $("mes0").value;
+    return v;
   }
   async function correr() {
     const a = {
       formacion: args.formacion || "Vaca Muerta", n_pozos: +$("n_pozos").value, meses: +$("meses").value,
       ventana: $("ventana").value || null, cohorte_ref: $("cohorte_ref").value ? +$("cohorte_ref").value : null,
       rama_m: $("rama_m").value ? +$("rama_m").value : null, ritmo_pozos_por_mes: $("ritmo").value ? +$("ritmo").value : null,
-      uptime: +$("uptime").value, tasa: args.tasa || "petroleo_m3_d", n_sim: args.n_sim || 500,
+      uptime: +$("uptime").value, tasa: args.tasa || "petroleo_m3_d", n_sim: args.n_sim || 500, valorizar: valorizarDesdeForm(),
     };
     for (const k in a) if (a[k] === null) delete a[k];
+    args.valorizar = a.valorizar;
     $("correr").disabled = true;
     try { render(VMA.parse(await VMA.callTool("simular_campania", a))); }
     catch (e) { $("sub").textContent = "El host no permitió la llamada: " + (e.message || JSON.stringify(e)); $("correr").disabled = false; }
   }
   $("correr").addEventListener("click", correr);
+  $("unidad").addEventListener("click", (ev) => { const b = ev.target.closest("button"); if (!b) return; unidad = b.dataset.u; if (window.__ultimo) render(window.__ultimo); });
   VMA.onInput = (a) => llenar(a);
-  VMA.onResult = (res) => render(VMA.parse(res));
+  VMA.onResult = (res) => { const env = VMA.parse(res); window.__ultimo = env; if (env && env.datos && env.datos.usd && !env.datos.usd.sin_dato_porque) unidad = "usd"; render(env); };
+  const _render = render; render = (env) => { window.__ultimo = env; _render(env); };
   window.addEventListener("resize", () => { c1 && c1.resize(); c2 && c2.resize(); });
   VMA.start();
   llenar({});

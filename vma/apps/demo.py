@@ -27,7 +27,10 @@ ROOT = Path(__file__).resolve().parents[2]
 FIX = ROOT / "tests" / "fixtures" / "sintetico"
 
 LLAMADAS = {
-    "curva_mia.html": ("comparar_mi_pozo", {"sigla": "MIO-003", "mes_max": 24}),
+    "curva_mia.html": (
+        "comparar_mi_pozo",
+        {"sigla": "MIO-003", "mes_max": 24, "valorizar": {"modo": "historico", "regalia": 0.12}},
+    ),
     "mapa_vecinos.html": ("vecinos_de_mis_pozos", {"radio_km": 8, "filtros": {"campania": "PAD-A"}}),
     "ranking_posicion.html": (
         "comparar_mi_campania",
@@ -43,6 +46,7 @@ LLAMADAS = {
             "rama_m": 2800,
             "ritmo_pozos_por_mes": 3,
             "n_sim": 300,
+            "valorizar": {"modo": "ultimo", "tasa_anual": 0.10},
         },
     ),
 }

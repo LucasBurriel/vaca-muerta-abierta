@@ -44,3 +44,8 @@ input[type="number"], select { font: inherit; color: var(--fg); background: var(
 button { font: inherit; background: var(--accent); color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 button:disabled { opacity: 0.5; cursor: wait; }
 .controles { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; align-items: end; margin: 8px 0; }
+.barra { display: flex; align-items: center; gap: 12px; margin: 6px 0 0; flex-wrap: wrap; }
+.conmutador { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.conmutador button { background: var(--card); color: var(--fg); border: 0; border-radius: 0; padding: 4px 10px; font-size: 12px; }
+.conmutador button + button { border-left: 1px solid var(--line); }
+.conmutador button.activo { background: var(--accent); color: #fff; }

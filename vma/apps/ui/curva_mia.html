@@ -13,15 +13,23 @@
 <p class="sub" id="sub">Esperando el resultado de <code>comparar_mi_pozo</code>…</p>
 <div id="aviso" class="aviso" hidden></div>
 <div class="fila" id="tarjetas"></div>
+<div class="barra">
+  <div class="conmutador" id="unidad" hidden>
+    <button type="button" data-u="tasa" class="activo">m³/d</button><button type="button" data-u="usd">USD/mes</button>
+  </div>
+  <span class="nota" id="usd_sub"></span>
+</div>
 <div id="grafico" class="grafico"></div>
 <div id="tabla"></div>
-<p class="nota">Tasa por día efectivo (ADR-016). P10 es el caso alto. El percentil es una interpolación entre los tres cuantiles publicados (<code>docs/mis-datos.md</code>). Los meses sin estadístico publicado (menos de 5 pozos, ADR-017) no se dibujan.</p>
+<p class="nota">Tasa por día efectivo (ADR-016). P10 es el caso alto. El percentil es una interpolación entre los tres cuantiles publicados (<code>docs/mis-datos.md</code>). Los meses sin estadístico publicado (menos de 5 pozos, ADR-017) no se dibujan. <span id="usd_nota" hidden>USD/mes = ingreso bruto a precios públicos (<code>docs/precios.md</code>): sin costos ni regalías salvo que se pidan; el pozo tipo del grupo se valoriza en los mismos meses calendario.</span></p>
 <div class="cita" id="cita"></div>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
-  let chart = null;
+  let chart = null, unidad = "tasa";
   function tarjeta(k, v, mio) { return `<div class="tarjeta"><div class="k">${k}</div><div class="v${mio ? " mio" : ""}">${v}</div></div>`; }
+  const usdOk = (d) => d && d.usd && !d.usd.sin_dato_porque && d.usd.mio && d.usd.mio.series;
+  const fmtUsd = (x) => (x === null || x === undefined) ? "–" : "US$ " + VMA.fmt(x, 3);
   function render(env) {
     if (!env || env.error) { $("sub").textContent = "Error: " + ((env && env.error) || "sin datos"); return; }
     const d = env.datos, g = d.grupo, r = d.resumen, p = d.pozo;
@@ -29,6 +37,7 @@
     $("titulo").firstChild.textContent = `${p.sigla_original || p.sigla} contra la curva tipo ${g.cohorte} · ${g.formacion}${g.ventana ? " · " + g.ventana : ""} `;
     $("sub").innerHTML = `${d.tasa} · nivel <code>${g.nivel}</code> · ${g.meses_publicables} meses publicables · ${r.n_meses_comparados} meses comparados` + (p.rama_m ? ` · rama ${VMA.fmt(p.rama_m)} m` : "");
     const avisos = (env.notas || []).filter((n) => n.startsWith("aviso") || n.includes("cohorte_ref") || n.includes("mezcla"));
+    if (d.usd && d.usd.sin_dato_porque) avisos.push("USD: " + d.usd.sin_dato_porque);
     $("aviso").hidden = !avisos.length; $("aviso").textContent = avisos.join(" · ");
     const ivg = d.indicadores_vs_grupo || {};
     let t = tarjeta("percentil mediano", r.percentil_mediano !== null && r.percentil_mediano !== undefined ? "P" + Math.round(r.percentil_mediano) : "–", true);
@@ -37,36 +46,53 @@
     if (ivg.ip90) t += tarjeta("IP90 vs grupo", `${VMA.fmt(ivg.ip90.mio)} <span class="k">vs ${VMA.fmt(ivg.ip90.mediana_publica)} · supera ${Math.round(ivg.ip90.supera_pct_publicos)} %</span>`);
     if (ivg.ip90_por_m) t += tarjeta("IP90/m vs grupo", `${VMA.fmt(ivg.ip90_por_m.mio, 3)} <span class="k">vs ${VMA.fmt(ivg.ip90_por_m.mediana_publica, 3)} · supera ${Math.round(ivg.ip90_por_m.supera_pct_publicos)} %</span>`);
     if (ivg.acum12) t += tarjeta("acum 12 m vs grupo", `${VMA.fmt(ivg.acum12.mio)} <span class="k">vs ${VMA.fmt(ivg.acum12.mediana_publica)} · supera ${Math.round(ivg.acum12.supera_pct_publicos)} %</span>`);
+    const hayUsd = usdOk(d);
+    if (hayUsd) {
+      const u = d.usd, tm = u.mio.total, tp = (u.grupo_p50 || {}).total || {};
+      t += tarjeta(`VAN mío · ${Math.round(u.tasa_anual * 100)} % anual`, `${fmtUsd(tm.van_usd)} <span class="k">bruto ${fmtUsd(tm.ingreso_usd)} en ${tm.meses} meses${u.regalia ? " · neto de regalía " + Math.round(u.regalia * 100) + " %" : ""}</span>`, true);
+      t += tarjeta("VAN pozo tipo P50", `${fmtUsd(tp.van_usd)} <span class="k">P10 ${fmtUsd(((u.grupo_p10 || {}).total || {}).van_usd)} · P90 ${fmtUsd(((u.grupo_p90 || {}).total || {}).van_usd)}</span>`);
+    }
     $("tarjetas").innerHTML = t;
+    $("unidad").hidden = !hayUsd; $("usd_nota").hidden = !hayUsd;
+    if (!hayUsd) unidad = "tasa";
+    $("usd_sub").textContent = hayUsd ? `precio ${d.usd.modo}${d.usd.mes0 ? " desde " + d.usd.mes0 : ""} · ${(d.usd.p_region || (d.usd.cita && d.usd.cita.filtros && d.usd.cita.filtros.petroleo ? d.usd.cita.filtros.petroleo.region : ""))}` : "";
+    for (const b of $("unidad").querySelectorAll("button")) b.classList.toggle("activo", b.dataset.u === unidad);
     const meses = d.meses || [];
     const xs = meses.map((m) => m.mes);
     const serie = (k) => meses.map((m) => (m[k] === null || m[k] === undefined ? null : [m.mes, m[k]]));
+    const serieUsd = (bloque) => (bloque && bloque.series ? bloque.series.mes.map((m, i) => (bloque.series.ingreso_usd[i] === null ? null : [m, bloque.series.ingreso_usd[i]])) : []);
     const dark = (VMA.ctx.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
     chart = chart || echarts.init($("grafico"), dark ? "dark" : null, { renderer: "canvas" });
+    const esUsd = unidad === "usd" && hayUsd;
+    const u = d.usd || {};
+    const nombre = p.sigla_original || p.sigla;
     chart.setOption({
       backgroundColor: "transparent",
       animation: false,
-      grid: { left: 56, right: 16, top: 30, bottom: 36 },
-      tooltip: { trigger: "axis", valueFormatter: (v) => VMA.fmt(v) },
+      grid: { left: esUsd ? 80 : 56, right: 16, top: 30, bottom: 36 },
+      tooltip: { trigger: "axis", valueFormatter: (v) => (esUsd ? fmtUsd(v) : VMA.fmt(v)) },
       legend: { top: 0, textStyle: { color: dark ? "#ddd" : "#333" } },
       xAxis: { type: "value", name: "mes desde la primera producción", nameLocation: "middle", nameGap: 24, min: 0, max: Math.max(...xs, 1) },
-      yAxis: { type: "log", name: d.tasa, logBase: 10, min: (v) => Math.max(v.min * 0.8, 0.01) },
+      yAxis: esUsd ? { type: "value", name: "USD/mes (bruto)", axisLabel: { formatter: (v) => VMA.fmt(v, 2) } } : { type: "log", name: d.tasa, logBase: 10, min: (v) => Math.max(v.min * 0.8, 0.01) },
       series: [
-        { name: "P10 (alto)", type: "line", data: serie("p10"), showSymbol: false, lineStyle: { type: "dashed", width: 1, color: "#999" }, itemStyle: { color: "#999" } },
-        { name: "P50", type: "line", data: serie("p50"), showSymbol: false, lineStyle: { width: 2, color: "#b5451b" }, itemStyle: { color: "#b5451b" } },
-        { name: "P90 (bajo)", type: "line", data: serie("p90"), showSymbol: false, lineStyle: { type: "dashed", width: 1, color: "#999" }, itemStyle: { color: "#999" } },
-        { name: p.sigla_original || p.sigla, type: "line", data: serie("mio"), symbol: "circle", symbolSize: 6, lineStyle: { width: 2.5, color: "#1f6fb2" }, itemStyle: { color: "#1f6fb2" } },
+        { name: "P10 (alto)", type: "line", data: esUsd ? serieUsd(u.grupo_p10) : serie("p10"), showSymbol: false, lineStyle: { type: "dashed", width: 1, color: "#999" }, itemStyle: { color: "#999" } },
+        { name: "P50", type: "line", data: esUsd ? serieUsd(u.grupo_p50) : serie("p50"), showSymbol: false, lineStyle: { width: 2, color: "#b5451b" }, itemStyle: { color: "#b5451b" } },
+        { name: "P90 (bajo)", type: "line", data: esUsd ? serieUsd(u.grupo_p90) : serie("p90"), showSymbol: false, lineStyle: { type: "dashed", width: 1, color: "#999" }, itemStyle: { color: "#999" } },
+        { name: nombre, type: "line", data: esUsd ? serieUsd(u.mio) : serie("mio"), symbol: "circle", symbolSize: 6, lineStyle: { width: 2.5, color: "#1f6fb2" }, itemStyle: { color: "#1f6fb2" } },
       ],
     }, true);
     const filas = meses.filter((m) => m.p50 !== null && m.p50 !== undefined).slice(0, 36);
     $("tabla").innerHTML = `<table><thead><tr><th>mes</th><th>mío</th><th>P10</th><th>P50</th><th>P90</th><th>percentil</th><th>mío/P50</th><th>n</th></tr></thead><tbody>` +
       filas.map((m) => `<tr><td>${m.mes}</td><td class="mio" style="color:var(--mio);font-weight:600">${VMA.fmt(m.mio)}</td><td>${VMA.fmt(m.p10)}</td><td>${VMA.fmt(m.p50)}</td><td>${VMA.fmt(m.p90)}</td><td>${m.percentil !== undefined ? "P" + Math.round(m.percentil) : "–"}</td><td>${VMA.fmt(m.ratio_p50, 3)}</td><td>${m.n_pozos ?? "–"}</td></tr>`).join("") + `</tbody></table>`;
     const c = env.cita || {};
-    $("cita").innerHTML = `Cita: <code>${c.tabla}</code> · filtros ${JSON.stringify(c.filtros)} · ${c.regla_doc} · datos ${env.fecha_datos}, maestro ${env.version_maestro}, fuente ${env.fuente}`;
+    let cita = `Cita: <code>${c.tabla}</code> · filtros ${JSON.stringify(c.filtros)} · ${c.regla_doc} · datos ${env.fecha_datos}, maestro ${env.version_maestro}, fuente ${env.fuente}`;
+    if (hayUsd && d.usd.cita) cita += `<br>Precios: <code>${d.usd.cita.tabla}</code> · ${JSON.stringify(d.usd.cita.filtros)} · ${d.usd.cita.regla_doc}`;
+    $("cita").innerHTML = cita;
   }
   VMA.onResult = (res) => render(VMA.parse(res));
   VMA.onContext = () => { if (chart) { chart.dispose(); chart = null; } if (window.__ultimo) render(window.__ultimo); };
   const _render = render; render = (env) => { window.__ultimo = env; _render(env); };
+  $("unidad").addEventListener("click", (ev) => { const b = ev.target.closest("button"); if (!b) return; unidad = b.dataset.u; if (window.__ultimo) render(window.__ultimo); });
   window.addEventListener("resize", () => chart && chart.resize());
   VMA.start();
   if (!VMA.enHost) $("sub").textContent = "Abierto fuera de un host MCP: no hay resultado que mostrar.";
