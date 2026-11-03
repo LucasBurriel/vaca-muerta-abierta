@@ -1932,7 +1932,10 @@ def _valorizacion(
     modo = p.get("modo") or modo_default
     if modo not in VZ.MODOS:
         raise ErrorHerramienta(f"valorizar.modo debe ser uno de {', '.join(VZ.MODOS)}; recibí {modo!r}")
-    mes0 = VZ.validar_mes(p.get("mes0")) if p.get("mes0") else mes0
+    try:
+        mes0 = VZ.validar_mes(p.get("mes0")) if p.get("mes0") else mes0
+    except VZ.ErrorValorizacion as e:
+        raise ErrorHerramienta(f"valorizar: {e}") from e
     tasa = float(p.get("tasa_anual", VZ.TASA_ANUAL_DEFAULT))
     regalia = float(p.get("regalia", 0.0))
     notas = list(notas_extra or [])
@@ -2045,8 +2048,11 @@ def precios(
     else:
         segmento = SEGMENTO_PETROLEO
         contrato = None
-    desde = VZ.validar_mes(desde, "desde")
-    hasta = VZ.validar_mes(hasta, "hasta")
+    try:
+        desde = VZ.validar_mes(desde, "desde")
+        hasta = VZ.validar_mes(hasta, "hasta")
+    except VZ.ErrorValorizacion as e:
+        raise ErrorHerramienta(str(e)) from e
     preds = ["producto = ?", "region = ?", "segmento = ?"]
     params: list = [producto, region_c, segmento]
     if contrato:

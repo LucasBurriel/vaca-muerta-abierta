@@ -4,13 +4,9 @@ hand-computed figures, the tools with and without ``valorizar``, and the views. 
 from __future__ import annotations
 
 import json
-from datetime import date
 from pathlib import Path
 
-import duckdb
-import pandas as pd
 import pytest
-import test_consulta as TC
 
 from vma import units
 from vma.consulta import datos as D
@@ -145,81 +141,8 @@ def test_region_names_resolve_loosely():
 # --- the table through the data layer, on both sources -----------------------------------------------------------------
 
 
-def _tabla_fixture() -> pd.DataFrame:
-    r, meta = F.leer_regalias_crudo(FIX / "regalias_crudo.zip")
-    g = F.leer_precios_gas(FIX / "precios_gas.csv")
-    return F.construir(
-        r, g, fecha_descarga="2026-11-02", version="2026-10-31", fecha_realizacion=meta["fecha_realizacion"]
-    )
-
-
-@pytest.fixture(scope="module")
-def raiz_precios(tmp_path_factory) -> Path:
-    """The F4 fake repo (tests/test_consulta.py) plus the prices table in both sources."""
-    from vma import site as S
-
-    root = tmp_path_factory.mktemp("repo_precios")
-    pub = root / "data" / "publicado" / "2026-10-31"
-    pub.mkdir(parents=True)
-    con = duckdb.connect()
-    t = _tabla_fixture()
-    for name, df in (
-        ("pozos", TC._master()),
-        ("indicadores", TC._ind()),
-        ("curvas_tipo", TC._curvas()),
-        ("precios", t),
-    ):
-        con.register("t", df)
-        con.execute(f"COPY t TO '{(pub / f'{name}.parquet').as_posix()}' (FORMAT PARQUET)")
-        con.unregister("t")
-    S.build_site_data(
-        root / "site" / "data",
-        TC._master(),
-        TC._ind(),
-        TC._curvas(),
-        TC.MANIFEST,
-        "2026-10-31",
-        today=date(2026, 10, 31),
-        precios=t,
-    )
-    return root
-
-
-@pytest.fixture(scope="module")
-def raiz_sin_precios(tmp_path_factory) -> Path:
-    from vma import site as S
-
-    root = tmp_path_factory.mktemp("repo_sin_precios")
-    pub = root / "data" / "publicado" / "2026-10-31"
-    pub.mkdir(parents=True)
-    con = duckdb.connect()
-    for name, df in (("pozos", TC._master()), ("indicadores", TC._ind()), ("curvas_tipo", TC._curvas())):
-        con.register("t", df)
-        con.execute(f"COPY t TO '{(pub / f'{name}.parquet').as_posix()}' (FORMAT PARQUET)")
-        con.unregister("t")
-    S.build_site_data(
-        root / "site" / "data",
-        TC._master(),
-        TC._ind(),
-        TC._curvas(),
-        TC.MANIFEST,
-        "2026-10-31",
-        today=date(2026, 10, 31),
-    )
-    return root
-
-
-@pytest.fixture(params=["parquet", "json"])
-def d(raiz_precios, request) -> D.Datos:
-    return D.abrir(raiz_precios, request.param)
-
-
-@pytest.fixture(params=["parquet", "json"])
-def d_sin(raiz_sin_precios, request) -> D.Datos:
-    return D.abrir(raiz_sin_precios, request.param)
-
-
-def test_precios_is_an_optional_fourth_table(d, d_sin):
+def test_precios_is_an_optional_fourth_table(d_precios, d_sin_precios):
+    d, d_sin = d_precios, d_sin_precios
     assert D.TABLAS == ("pozos", "indicadores", "curvas_tipo") and D.TABLAS_OPCIONALES == ("precios",)
     assert d.tiene_precios() and d.tiene("precios", "precio_usd_mil_m3")
     n_gas_total = d.con.execute(
