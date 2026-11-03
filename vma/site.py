@@ -368,12 +368,18 @@ def build_site_data(
     version_maestro: str,
     today: date | None = None,
     mes_max: int = MES_MAX,
+    precios: pd.DataFrame | None = None,
 ) -> dict:
-    """Write every JSON the site needs into ``out_dir`` and return the meta dict."""
+    """Write every JSON the site needs into ``out_dir`` and return the meta dict. ``precios`` (F6) is optional:
+    when given, its snapshot is written too; when not, an existing ``precios.json`` is left as it is."""
+    from vma.precios.fuentes import snapshot_json
+
     today = today or date.today()
     out_dir.mkdir(parents=True, exist_ok=True)
     archivos: dict[str, int] = {}
     archivos["pozos.json"] = _dump(out_dir / "pozos.json", build_pozos(ind, master))
+    if precios is not None:
+        archivos["precios.json"] = _dump(out_dir / "precios.json", snapshot_json(precios))
     for nivel in NIVELES:
         archivos[f"curvas_{nivel}.json"] = _dump(
             out_dir / f"curvas_{nivel}.json", build_curvas(curvas, nivel, mes_max)
@@ -403,10 +409,11 @@ def run(root: Path, today: date | None = None) -> Path:
     master = pd.read_parquet(pub / "pozos.parquet")
     ind = pd.read_parquet(pub / "indicadores.parquet")
     curvas = pd.read_parquet(pub / "curvas_tipo.parquet")
+    precios = pd.read_parquet(pub / "precios.parquet") if (pub / "precios.parquet").exists() else None
     manifest_path = latest_raw_dir(root) / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     out_dir = root / "site" / "data"
-    meta = build_site_data(out_dir, master, ind, curvas, manifest, pub.name, today)
+    meta = build_site_data(out_dir, master, ind, curvas, manifest, pub.name, today, precios=precios)
     total = sum(meta["archivos"].values())
     print(f"site data -> {out_dir}  ({total / 1e6:.2f} MB in {len(meta['archivos'])} files)")
     for k, v in meta["archivos"].items():

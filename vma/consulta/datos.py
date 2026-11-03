@@ -23,11 +23,16 @@ import pandas as pd
 from vma.normalize import sigla_l2, sigla_l3, sigla_l4
 
 TABLAS = ("pozos", "indicadores", "curvas_tipo")
+TABLAS_OPCIONALES = (
+    "precios",
+)  # F6: published when the owner runs `pipeline.py precios`; empty otherwise (ADR-034)
+TODAS = TABLAS + TABLAS_OPCIONALES
 NIVELES = ("cohorte_formacion", "cohorte_formacion_ventana", "cohorte_formacion_operadora")
 DOCS = {
     "pozos": "docs/maestro.md",
     "indicadores": "docs/indicadores.md",
     "curvas_tipo": "docs/indicadores.md#curvas_tipo--columns",
+    "precios": "docs/precios.md",
 }
 
 
@@ -48,8 +53,8 @@ class Datos:
 
     def columnas(self, tabla: str) -> list[tuple[str, str]]:
         """``[(column, duckdb type), ...]`` of a table in this source."""
-        if tabla not in TABLAS:
-            raise KeyError(f"tabla desconocida: {tabla!r}; las tablas son {', '.join(TABLAS)}")
+        if tabla not in TODAS:
+            raise KeyError(f"tabla desconocida: {tabla!r}; las tablas son {', '.join(TODAS)}")
         if tabla not in self._columnas:
             rows = self.con.execute(f"DESCRIBE SELECT * FROM {tabla}").fetchall()
             self._columnas[tabla] = [(r[0], r[1]) for r in rows]
@@ -64,6 +69,10 @@ class Datos:
 
     def n_filas(self, tabla: str) -> int:
         return int(self.con.execute(f"SELECT count(*) FROM {tabla}").fetchone()[0])
+
+    def tiene_precios(self) -> bool:
+        """Whether the ``precios`` table has rows in this source (F6; empty until `pipeline.py precios` ran)."""
+        return self.n_filas("precios") > 0
 
     # --- queries ----------------------------------------------------------------------------------------
 
@@ -118,6 +127,7 @@ def abrir_parquet(carpeta: Path, meta_json: Path | None = None) -> Datos:
     for t in TABLAS:
         path = (carpeta / f"{t}.parquet").as_posix()
         con.execute(f"CREATE VIEW {t} AS SELECT * FROM read_parquet('{path}')")
+    _registrar_precios(con, carpeta / "precios.parquet")
     fecha, version = con.execute(
         "SELECT any_value(fecha_descarga), any_value(version_maestro) FROM indicadores"
     ).fetchone()
@@ -226,6 +236,7 @@ def abrir_json(site_data: Path) -> Datos:
     con.execute("CREATE TABLE indicadores AS SELECT * FROM _ind")
     con.execute("CREATE TABLE pozos AS SELECT * FROM _pozos")
     con.execute("CREATE TABLE curvas_tipo AS SELECT * FROM _curvas")
+    _registrar_precios(con, site_data / "precios.json")
     _registrar_claves(con)
     return Datos(
         con=con,
@@ -235,6 +246,26 @@ def abrir_json(site_data: Path) -> Datos:
         version_maestro=version,
         meta=meta,
     )
+
+
+# --- the optional prices table (F6) ----------------------------------------------------------------------------------
+
+
+def _registrar_precios(con: duckdb.DuckDBPyConnection, origen: Path) -> None:
+    """``precios`` as a view on the Parquet, a table from the JSON snapshot, or the empty schema when the source
+    has neither, so every tool can query it and say "sin dato porque" instead of failing (ADR-034)."""
+    from vma.precios import fuentes as PF
+
+    origen = Path(origen)
+    if origen.suffix == ".parquet" and origen.exists():
+        con.execute(f"CREATE VIEW precios AS SELECT * FROM read_parquet('{origen.as_posix()}')")
+        return
+    if origen.suffix == ".json" and origen.exists():
+        df = PF.desde_json(_leer(origen))
+    else:
+        df = PF.tabla_vacia()
+    con.register("_precios", df)
+    con.execute("CREATE TABLE precios AS SELECT * FROM _precios")
 
 
 # --- sigla levels for buscar_pozo -----------------------------------------------------------------------------------

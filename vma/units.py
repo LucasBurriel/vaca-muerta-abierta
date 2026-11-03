@@ -11,6 +11,8 @@ Factors:
   1 ft                         = 0.3048 m
   oil equivalent (Secretaría)  1 m³ oil ≡ 1,000 m³ gas  (so 1 unit of ``prod_gas`` in
                                thousands of m³ counts as 1 m³ of oil equivalent)
+  gas energy (F6, ADR-034)     1 MMBTU = 252,000 kcal; gas volumes are at the Argentine reference
+                               9,300 kcal/m³, so 1 mil m³ = 36.905 MMBTU
 """
 
 from __future__ import annotations
@@ -22,6 +24,11 @@ M_PER_FT = 0.3048
 FT_PER_M = 1 / M_PER_FT
 LB_PER_KG = 2.20462262185
 M3_GAS_PER_M3_OIL_EQ = 1000.0
+KCAL_PER_MMBTU = 252_000.0  # 1 BTU = 0.252 kcal (ENARGAS rounds the same way)
+KCAL_PER_M3_GAS = (
+    9_300.0  # reference calorific value of the published gas volumes (Res. 319/93 reporting base)
+)
+MMBTU_PER_THOUSAND_M3 = 1000.0 * KCAL_PER_M3_GAS / KCAL_PER_MMBTU  # 36.9048
 
 
 def m3_to_bbl(m3: float) -> float:
@@ -71,6 +78,20 @@ def tonnes_per_m_to_lb_per_ft(t_per_m: float) -> float:
 def m3_per_m_to_bbl_per_ft(m3_per_m: float) -> float:
     """Fluid intensity m³/m -> bbl/ft."""
     return m3_to_bbl(m3_per_m) / FT_PER_M
+
+
+def usd_per_mmbtu_to_usd_per_thousand_m3(p: float) -> float:
+    """Gas price USD/MMBTU -> USD per mil m³ at 9,300 kcal/m³ (F6, ADR-034)."""
+    return p * MMBTU_PER_THOUSAND_M3
+
+
+def usd_per_bbl_to_usd_per_m3(p: float) -> float:
+    """Oil price USD/bbl -> USD/m³."""
+    return p * BBL_PER_M3
+
+
+def usd_per_m3_to_usd_per_bbl(p: float) -> float:
+    return p * M3_PER_BBL
 
 
 def daily_rate(volume_month: float, days: float | None) -> float | None:

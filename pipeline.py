@@ -9,6 +9,8 @@ python pipeline.py diff [--a DATE --b DATE]      informes/diff-<a>-<b>.md betwee
 python pipeline.py indicadores                   data/publicado/<date>/indicadores.{csv,parquet} (per-well indicators)
 python pipeline.py curvas                        data/publicado/<date>/curvas_tipo.{csv,parquet} + informes/indicadores-<date>.md
 python pipeline.py site                          site/data/*.json for the static site (from the latest published tables)
+python pipeline.py precios                       data/publicado/<date>/precios.{csv,parquet} + site/data/precios.json (F6; needs
+                                                 `download regalias_crudo precios_gas` first)
 python pipeline.py sintetico [--n 30] [--semilla 7] [--salida DIR]   synthetic "my wells" dataset from public wells + noise (F5)
 """
 
@@ -48,6 +50,17 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--day", type=date.fromisoformat, default=None, help="publication date (default: today)")
     st = sub.add_parser("site", help="pre-aggregated JSON for the static site -> site/data/")
     st.add_argument("--day", type=date.fromisoformat, default=None, help="generation date (default: today)")
+    pr = sub.add_parser(
+        "precios",
+        help="public prices (crude USD/m³ by province, gas USD/MMBTU by basin) -> precios table + site snapshot (ADR-034)",
+    )
+    pr.add_argument(
+        "--day",
+        type=date.fromisoformat,
+        default=None,
+        help="publication folder (default: the newest data/publicado/<date>/ with the core tables, else today)",
+    )
+    pr.add_argument("--sin-site", action="store_true", help="do not rewrite site/data/precios.json")
     sn = sub.add_parser(
         "sintetico", help="synthetic 'mis pozos' dataset from public wells with noise (ADR-030)"
     )
@@ -102,6 +115,11 @@ def main(argv: list[str] | None = None) -> int:
         from vma.site import run
 
         run(ROOT, today=args.day)
+        return 0
+    if args.cmd == "precios":
+        from vma.precios.fuentes import run
+
+        run(ROOT, today=args.day, salida_site=not args.sin_site)
         return 0
     if args.cmd == "sintetico":
         from vma.propios.sintetico import run
