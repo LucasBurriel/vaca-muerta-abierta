@@ -16,6 +16,7 @@ from vma import units
 from vma.consulta import datos as D
 from vma.precios import cuenca_gas_canonica, provincia_canonica
 from vma.precios import fuentes as F
+from vma.precios import valorizar as V
 
 ROOT = Path(__file__).resolve().parents[1]
 FIX = ROOT / "tests" / "fixtures" / "precios"
@@ -239,3 +240,131 @@ def test_precios_is_an_optional_fourth_table(d, d_sin):
     )
     with pytest.raises(KeyError):
         d.columnas("regalias")
+
+
+# --- the valuation, with figures computed by hand ----------------------------------------------------------------------
+
+
+def _series():
+    oil = V.SeriePrecio(
+        "petroleo",
+        "Neuquén",
+        "USD/m³",
+        {"2024-01": 500.0, "2024-02": 510.0, "2024-03": 520.0},
+        "regalias_crudo",
+        "promedio_venta",
+        None,
+        {"2024-03"},
+    )
+    gas = V.SeriePrecio(
+        "gas",
+        "Neuquina",
+        "USD/mil m³",
+        {"2024-01": 100.0, "2024-02": 110.0, "2024-03": 120.0},
+        "precios_gas",
+        "ppp",
+        "total",
+    )
+    return oil, gas
+
+
+def test_historico_prices_each_calendar_month_then_holds_the_last_one():
+    oil, gas = _series()
+    r = V.valorizar(
+        [100, 80, 60, 50],
+        [10, 8, 6, 5],
+        modo="historico",
+        precio_petroleo=oil,
+        precio_gas=gas,
+        mes0="2024-02",
+        tasa_anual=0.12,
+        regalia=0.12,
+    )
+    m = r["por_mes"]
+    # month 0 = 2024-02: 100 × 510 + 10 × 110 = 52,100 gross; 12 % royalty = 6,252; 45,848 net, undiscounted
+    assert m[0]["mes_calendario"] == "2024-02" and m[0]["bruto_usd"] == 52_100.0
+    assert m[0]["regalia_usd"] == pytest.approx(6_252.0) and m[0]["ingreso_usd"] == pytest.approx(45_848.0)
+    assert m[0]["descontado_usd"] == pytest.approx(45_848.0)
+    # month 1 = 2024-03 (provisional): 80 × 520 + 8 × 120 = 42,560
+    assert m[1]["bruto_usd"] == pytest.approx(42_560.0)
+    # months 2 and 3 are after the last published month: last price held (520 / 120)
+    assert m[2]["precio_petroleo_usd_m3"] == 520.0 and m[3]["precio_gas_usd_mil_m3"] == 120.0
+    assert m[3]["bruto_usd"] == pytest.approx(50 * 520 + 5 * 120)
+    t = r["total"]
+    bruto = 52_100 + 42_560 + (60 * 520 + 6 * 120) + (50 * 520 + 5 * 120)
+    assert t["bruto_usd"] == pytest.approx(bruto) and t["regalia_usd"] == pytest.approx(0.12 * bruto)
+    assert t["ingreso_usd"] == pytest.approx(0.88 * bruto) and t["petroleo_usd"] == pytest.approx(
+        100 * 510 + 80 * 520 + 60 * 520 + 50 * 520
+    )
+    van = sum(
+        0.88 * b * 1.12 ** (-k / 12)
+        for k, b in enumerate([52_100, 42_560, 60 * 520 + 6 * 120, 50 * 520 + 5 * 120])
+    )
+    assert t["van_usd"] == pytest.approx(van)
+    assert t["meses_con_ultimo_precio"] == 2 and t["meses_sin_precio"] == 0
+    assert r["precios"]["petroleo"]["min"] == 510.0 and r["precios"]["petroleo"]["max"] == 520.0
+    assert any("2 mes(es) posteriores" in n for n in r["notas"]) and any(
+        "provisorio" in n for n in r["notas"]
+    )
+    assert any("BRUTO" in n for n in r["notas"]) and any("9.300 kcal" in n for n in r["notas"])
+
+
+def test_months_before_the_first_price_have_no_usd_and_do_not_count():
+    oil, _ = _series()
+    r = V.valorizar(
+        [100, 100, 100], None, modo="historico", precio_petroleo=oil, mes0="2023-12", tasa_anual=0.0
+    )
+    assert r["por_mes"][0]["ingreso_usd"] is None and r["por_mes"][0]["acumulado_usd"] is None
+    assert r["total"]["meses_sin_precio"] == 1 and r["total"]["ingreso_usd"] == 100 * 500 + 100 * 510
+    assert r["total"]["van_usd"] == r["total"]["ingreso_usd"]  # 0 % rate: NPV = sum
+    assert r["precios"]["gas"] is None
+
+
+def test_flat_accepts_bbl_and_mmbtu_and_converts():
+    r = V.valorizar(
+        [100, 80], [10, 8], modo="flat", flat={"petroleo_usd_bbl": 70, "gas_usd_mmbtu": 4.0}, tasa_anual=0.10
+    )
+    p_m3 = 70 * units.BBL_PER_M3  # 440.29 USD/m³
+    g_mil = 4.0 * units.MMBTU_PER_THOUSAND_M3  # 147.62 USD per mil m³
+    assert r["precios"]["petroleo"]["precio"] == pytest.approx(p_m3) and r["precios"]["gas"][
+        "precio"
+    ] == pytest.approx(g_mil)
+    assert r["total"]["bruto_usd"] == pytest.approx(180 * p_m3 + 18 * g_mil)
+    assert r["total"]["van_usd"] == pytest.approx(
+        (100 * p_m3 + 10 * g_mil) + (80 * p_m3 + 8 * g_mil) * 1.1 ** (-1 / 12)
+    )
+    assert r["mes0"] is None and r["por_mes"][1]["mes_calendario"] is None
+    with pytest.raises(V.ErrorValorizacion, match="falta precio_flat"):
+        V.valorizar([1], [1], modo="flat", flat={"petroleo_usd_m3": 500})
+    with pytest.raises(V.ErrorValorizacion, match="claves desconocidas"):
+        V.valorizar([1], None, modo="flat", flat={"usd_bbl": 70})
+
+
+def test_ultimo_holds_the_last_published_price_and_compacto_gives_lists():
+    oil, _ = _series()
+    r = V.valorizar([100, 80], None, modo="ultimo", precio_petroleo=oil, compacto=True)
+    assert r["series"]["ingreso_usd"] == [52_000.0, 41_600.0] and r["series"]["acumulado_usd"] == [
+        52_000.0,
+        93_600.0,
+    ]
+    assert r["total"]["van_usd"] == pytest.approx(52_000 + 41_600 * 1.1 ** (-1 / 12))
+    assert r["precios"]["petroleo"]["ultimo_mes_publicado"] == "2024-03" and "por_mes" not in r
+
+
+def test_valuation_arguments_are_checked():
+    oil, _ = _series()
+    with pytest.raises(V.ErrorValorizacion, match="modo"):
+        V.valorizar([1], None, modo="spot", precio_petroleo=oil)
+    with pytest.raises(V.ErrorValorizacion, match="mes0"):
+        V.valorizar([1], None, modo="historico", precio_petroleo=oil)
+    with pytest.raises(V.ErrorValorizacion, match="YYYY-MM"):
+        V.valorizar([1], None, modo="historico", precio_petroleo=oil, mes0="2024/13")
+    with pytest.raises(V.ErrorValorizacion, match="regalia"):
+        V.valorizar([1], None, modo="ultimo", precio_petroleo=oil, regalia=1.5)
+    with pytest.raises(V.ErrorValorizacion, match="no hay serie de precio de gas"):
+        V.valorizar(None, [1], modo="ultimo", precio_petroleo=oil)
+    with pytest.raises(V.ErrorValorizacion, match="no hay volúmenes"):
+        V.valorizar([], [], modo="ultimo")
+    assert V.mes_mas("2024-11", 3) == "2025-02" and V.mes_mas("2024-01", -1) == "2023-12"
+    assert V.volumenes_desde_tasas([10.0, None], uptime=1.0) == [pytest.approx(10 * 365.25 / 12), None]
+    assert V.volumenes_desde_acumulado([100.0, 150.0, None, 180.0]) == [100.0, 50.0, None, 30.0]
