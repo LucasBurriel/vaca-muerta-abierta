@@ -20,6 +20,7 @@ This repository builds an **open observatory** on top of it, in phases that each
 | **F3 · Site** | static explorer: wells table with "no data because…" cells, type curves P10/P50/P90 with `n`, Leaflet map, method page; pre-aggregated JSON from the pipeline, rebuilt monthly by CI and deployed to GitHub Pages | **done** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
 | **F4 · Ask it questions** | a local agent (`agente.py`, CLI + chat) and an MCP server (`mcp_server.py`) over seven typed, read-only tools on the published tables; every result carries its citation (table, columns, filters, rule); a validator rejects any number the tools did not return; works on the committed JSON snapshot or on the Parquet tables | **done** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
 | **F6 · Talk money** | public prices as a published table: the realised crude price in USD/m³ by province and month (royalties report, since 1991) and the Res. 1/2018 gas price in USD/MMBTU by basin, segment and contract (since 2019), converted to the observatory's volume units; a `precios` tool and a `valorizar` parameter on type curves, your wells, your campaign, the decline forecast and the campaign simulator that adds USD per month, cumulative and a simple NPV with three price modes (historical, flat, last published) and an optional royalty; **gross revenue only**, no costs, said in every result; the MCP Apps views switch between m³/d and USD/mes and show the NPV | **done** → [`docs/precios.md`](docs/precios.md), ADR-034, ADR-035 |
+| **F7 · Simulate in the browser, read it in English** | the campaign Monte Carlo on the static site: `pipeline.py site` writes the P10/P50/P90 curves of every cohort × formation × window group already extended to 120 months (the same function the Python simulator uses) plus the default public prices, and a seeded Monte Carlo in JavaScript draws the campaigns in the reader's browser: aggregated rate, cumulative, gross revenue and NPV with a P10–P90 band, months published vs extrapolated on a card, every caveat on the page; the whole site in Spanish and English from one set of pages (`?lang=en`) | **done** → [simulator](https://lucasburriel.github.io/vaca-muerta-abierta/simulador.html?lang=en), [`docs/simulacion.md`](docs/simulacion.md), ADR-036, ADR-037 |
 | **F5 · Compare your wells** | a "my data" module: load your own monthly production (CSV/Parquet) in the session, compare each well with the published type curve of its cohort × formation × window, each campaign with its public medians, gaps below P50, neighbours on a map; Arps/Duong decline fits with EUR and a bootstrap band, campaign Monte Carlo from the published curves; MCP Apps views in Claude Desktop with text fallback; `vma-mcp` installable with `uvx`; five more public datasets catalogued (reserves, prices, royalties, field production, concessions); a synthetic dataset for tests and demos. Your data never leaves your machine | **done** → [For operators](#for-operators-compare-your-wells-f5-2026-11-02), [`docs/mis-datos.md`](docs/mis-datos.md), [`docs/simulacion.md`](docs/simulacion.md), [`docs/mcp-apps.md`](docs/mcp-apps.md) |
 
 ## For operators: compare your wells (F5, 2026-11-02)
@@ -161,8 +162,22 @@ the published tables (ADR-021, ADR-022). Every number on screen carries a `tabla
 says why it is empty (the row's `flags`); every rate says it is per producing day. Rebuilt on the 5th of each month
 by [`publish.yml`](.github/workflows/publish.yml) (ADR-024). Pages: home with the F0-F2 headlines, well explorer
 (filters, sort, CSV download), type curves (level, formation, window/operator, cohorts, outlier toggle, log axis),
-map (colour by IP90 per metre or by category, popup with the reason for each missing value), method and sources
-(manifest hashes, tables, rules, licences).
+campaign simulator (below), map (colour by IP90 per metre or by category, popup with the reason for each missing
+value), method and sources (manifest hashes, tables, rules, licences).
+
+**In English too (F7, 2026-11-12).** Every page has an ES | EN switch; `?lang=en` opens it in English and the
+links keep it. One set of pages: Spanish in the markup, the English in `site/js/i18n.js`, numbers formatted by
+language; column names, flags and ADR numbers are never translated (ADR-037).
+
+**Campaign simulator (F7).** [`simulador.html`](https://lucasburriel.github.io/vaca-muerta-abierta/simulador.html?lang=en):
+pick formation, fluid window and reference cohort, the number of wells, wells per month, lateral length, horizon,
+uptime, prices, discount rate and royalty; the browser draws 500 campaigns from the published type curve and shows
+the aggregated rate, the cumulative, gross revenue per month and cumulative with the P10–P90 band, and cards with
+the NPV of gross revenue, the per-well cumulative, the peak and how many months are extrapolated beyond the
+published curve. The curves arrive already extended by the pipeline (`site/data/simulador.json`, the same
+function the Python simulator uses); the Monte Carlo is `site/js/montecarlo.js`, seeded and reproducible, and a
+test compares it with `vma.simulacion.campania.simular` under Node (ADR-036). It is decline-curve sampling of a
+public group of wells: no interference, no facilities, no costs, gross revenue only, and the page says so.
 
 ![site: type curves](docs/sitio-curvas.png)
 ![site: map](docs/sitio-mapa.png)
@@ -248,7 +263,7 @@ Full report: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30.md).
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 178 tests, no network, no data, no model needed
+python -m pytest -q            # 242 tests, no network, no data, no model needed (Node, if present, also runs the browser Monte Carlo)
 
 python pipeline.py sources     # the catalogue (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<today>/ + manifest.json (URL, bytes, sha256, CKAN last_modified)
@@ -258,7 +273,7 @@ python pipeline.py master      # data/publicado/<today>/pozos.{csv,parquet} + in
 python pipeline.py diff        # informes/diff-<a>-<b>.md between the last two downloads (or --a/--b)
 python pipeline.py indicadores # data/publicado/<today>/indicadores.{csv,parquet}  (~10 s)
 python pipeline.py curvas      # data/publicado/<today>/curvas_tipo.{csv,parquet} + informes/indicadores-<today>.md + docs/indicadores-*.png
-python pipeline.py site        # site/data/*.json (+ meta.json) for the static site, from the latest published tables
+python pipeline.py site        # site/data/*.json (+ meta.json, + simulador.json) for the static site, from the latest published tables
 cd site && python -m http.server 8000   # open http://localhost:8000
 
 pip install -e ".[dev,agente]"  # F4: anthropic + mcp
@@ -300,7 +315,8 @@ vma/
   indicadores.py      F2: monthly production per well, IP in producing days, cumulatives, per metre, GOR, window, outliers
   curvas.py           F2: type curves P10/P50/P90/mean by cohort × formation (× window, × operator), min 5 wells
   informe_indicadores.py  the F2 report and its four charts
-  site.py             F3: pre-aggregated JSON for the site (pozos, curvas per level, resumen, meta with manifest hashes)
+  site.py             F3: pre-aggregated JSON for the site (pozos, curvas per level, resumen, meta with manifest hashes);
+                      F7: simulador.json (quantile curves extended to 120 months + default public prices)
   consulta/           F4: datos.py (DuckDB views over Parquet or site JSON) · herramientas.py (the seven tools + opt-in SQL,
                       every result with its citation) · validador.py (no number without a tool result) · agente.py (loop, providers)
   propios/            F5: the user's own wells: esquema.py (schema, aliases, validation) · cargar.py (indicators with the published rules,
@@ -310,22 +326,24 @@ vma/
   precios/            F6: fuentes.py (the two price parsers, the precios table, the site snapshot) · valorizar.py (volumes -> USD, NPV)
   consulta/ubicacion.py  F5: where the data is when installed as a package (clone, VMA_DATOS, cached public snapshot)
 agente.py             ask a question or chat; mcp_server.py  the same tools as an MCP server (stdio); entry points vma-agente, vma-mcp
-site/                 the static site: index · explorador · curvas · mapa · metodo (.html), js/, css/, data/ (generated, committed)
+site/                 the static site: index · explorador · curvas · simulador · mapa · metodo (.html), js/ (comun, i18n + idioma,
+                      montecarlo, one module per page), css/, data/ (generated, committed)
 .github/workflows/    tests.yml (every push, no data; runs the mock agent) · publish.yml (monthly + manual: download → tables → site → GitHub Pages)
 docs/
   fuentes.md          every dataset: URL, licence, grain, size, last data, units as published; the extended catalogue (F5)
-  decisiones.md       ADRs 001-035: name, scope, well key, units, raw-data policy, stack, capiv, lateral
+  decisiones.md       ADRs 001-037: name, scope, well key, units, raw-data policy, stack, capiv, lateral
                       precedence, master universe, alias policy, placeholder dates, publication format,
                       indicator grain, producing-day rates, minimum wells, outlier rule, lateral threshold, fluid window,
                       site stack, site data (JSON vs Parquet in the browser), what the site cuts, publish cadence,
                       F4 local agent + MCP without free SQL, Parquet/JSON double source, citation validator, model + mock,
                       F5 extended catalogue, own data never persisted + synthetic, simulation declared as DCA, MCP Apps, packaging,
-                      F6 price sources and the 9,300 kcal/m³ conversion, valuation as gross revenue with three price modes
+                      F6 price sources and the 9,300 kcal/m³ conversion, valuation as gross revenue with three price modes,
+                      F7 the browser simulator (extended quantiles + Monte Carlo in JS), the site in two languages
   maestro.md          every column of the master with its rule, and every flag
   indicadores.md      every column of indicadores and curvas_tipo: formula, units, rule, flags
   agente.md           F4: the tools, the envelope, the validator, providers, MCP config · ejemplos-agente.md  transcripts (F4 and F5)
   mis-datos.md        F5: your file's schema, mapping, validation, what is computed, the comparison tools, the synthetic dataset
-  simulacion.md       F5: decline models, fitting, EUR, bootstrap band, campaign Monte Carlo, assumptions and limits
+  simulacion.md       F5: decline models, fitting, EUR, bootstrap band, campaign Monte Carlo, assumptions and limits; F7: the browser simulator
   mcp-apps.md         F5: the four views, how the extension is served from Python, configuration, how it was tested
   precios.md          F6: the two price sources and how the XLSX is read, the precios table, the MMBTU conversion, the valuation modes, limits
   esquemas/           one markdown per dataset with its real columns
@@ -335,7 +353,8 @@ alias/                operadoras.csv, formaciones.csv (curated), siglas.csv (app
 data/publicado/       <date>/pozos.* (master), indicadores.* (one row per well), curvas_tipo.*, precios.* (git-ignored, rebuild or take the release)
 tests/                pytest, tiny CSV fixtures (master, diff), fake network, site JSON + JS/table column contract, F4 tools on Parquet and JSON + validator + mock agent,
                       F5 own data + synthetic fixture, decline fits and Monte Carlo, MCP Apps protocol on an in-memory client, packaging,
-                      F6 price parsers on fixtures with the real layout, hand-computed valuation, tools with and without valorizar
+                      F6 price parsers on fixtures with the real layout, hand-computed valuation, tools with and without valorizar,
+                      F7 simulador.json (schema, quantile order, splice, size), the JS Monte Carlo against Python under Node (tests/js/), the i18n contract
 ```
 
 ## Rules this repository follows

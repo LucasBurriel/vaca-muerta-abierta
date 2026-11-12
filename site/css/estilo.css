@@ -53,6 +53,13 @@ header.top nav { display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; }
 header.top nav a { color: var(--muted); padding: 0.1rem 0; border-bottom: 2px solid transparent; }
 header.top nav a.activa { color: var(--fg); border-bottom-color: var(--accent); }
 header.top .fecha { margin-left: auto; color: var(--muted); font-size: 0.85rem; }
+header.top .idioma { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; font-size: 0.78rem; font-weight: 600; }
+header.top .idioma a { padding: 0.1rem 0.5rem; color: var(--muted); }
+header.top .idioma a + a { border-left: 1px solid var(--line); }
+header.top .idioma a.activa { background: var(--accent); color: #fff; }
+header.top .idioma a:hover { text-decoration: none; color: var(--fg); }
+header.top .idioma a.activa:hover { color: #fff; }
+html.traduciendo body { visibility: hidden; } /* js/idioma.js: no flash of Spanish before the English is in */
 
 main.wrap { max-width: 1280px; margin: 0 auto; padding: 1.25rem 16px 3rem; }
 h1 { font-size: 1.6rem; margin: 0.25rem 0 0.5rem; }
@@ -84,6 +91,7 @@ p.lead { color: var(--muted); margin-top: 0; }
 .tarjeta .valor { font-size: 1.7rem; font-weight: 700; line-height: 1.1; }
 .tarjeta .titulo { color: var(--muted); font-size: 0.85rem; margin-top: 0.2rem; }
 .tarjeta .regla { font-size: 0.78rem; color: var(--muted); margin-top: 0.35rem; }
+.tarjeta .cita { white-space: normal; overflow-wrap: anywhere; margin-left: 0; }
 
 .filtros { display: flex; flex-wrap: wrap; gap: 0.6rem 1rem; align-items: end; margin: 0.75rem 0 1rem; }
 .filtros label { display: flex; flex-direction: column; font-size: 0.8rem; color: var(--muted); gap: 0.15rem; }
@@ -91,6 +99,7 @@ p.lead { color: var(--muted); margin-top: 0; }
   font: inherit; font-size: 0.92rem; padding: 0.3rem 0.4rem; min-width: 10rem;
   color: var(--fg); background: var(--card); border: 1px solid var(--line); border-radius: 4px;
 }
+.filtros input[type="checkbox"] { min-width: 0; padding: 0; }
 .filtros .check { flex-direction: row; align-items: center; gap: 0.4rem; color: var(--fg); font-size: 0.9rem; padding-bottom: 0.3rem; }
 .filtros button {
   font: inherit; font-size: 0.9rem; padding: 0.35rem 0.8rem; border-radius: 4px; cursor: pointer;
@@ -121,6 +130,29 @@ table.datos tr.fuera td { opacity: 0.6; }
 .leaflet-popup-content { font-family: var(--sans); font-size: 0.86rem; }
 .leaflet-popup-content table td { padding: 0 0.4rem 0 0; }
 
+/* home: the "try it" block that leads to the simulator */
+.probar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1.5rem; justify-content: space-between;
+  background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 6px;
+  padding: 0.9rem 1rem; margin: 1rem 0;
+}
+.probar-texto { flex: 1 1 22rem; display: flex; flex-direction: column; gap: 0.2rem; }
+.probar-texto b { font-size: 1.1rem; }
+.probar-texto span { color: var(--muted); font-size: 0.92rem; }
+.probar-boton {
+  background: var(--accent); color: #fff; font-weight: 600; padding: 0.55rem 1rem; border-radius: 5px; white-space: nowrap;
+}
+.probar-boton:hover { text-decoration: none; filter: brightness(1.08); }
+
+/* simulator: charts two by two, one column on a phone */
+.graficos-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 1rem 0 0.5rem; }
+.graficos-2 figure { margin: 0; min-width: 0; }
+.graficos-2 figcaption { font-size: 0.88rem; font-weight: 600; margin-bottom: 0.3rem; }
+.graficos-2 .grafico { height: 320px; }
+.nota ul.compacta { margin-top: 0.35rem; }
+ol.compacta { margin: 0.25rem 0; padding-left: 1.4rem; }
+#controles input[type="number"] { min-width: 6.5rem; width: 8.5rem; }
+
 .pie { margin-top: 2.5rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
 .pie code { font-size: 0.85em; }
 ul.compacta { margin: 0.25rem 0; padding-left: 1.2rem; }
@@ -128,6 +160,11 @@ ul.compacta { margin: 0.25rem 0; padding-left: 1.2rem; }
 @media (max-width: 720px) {
   .grafico { height: 380px; }
   header.top .fecha { margin-left: 0; }
+  .graficos-2 { grid-template-columns: minmax(0, 1fr); }
+  .graficos-2 .grafico { height: 280px; }
+  #controles label { flex: 1 1 42%; min-width: 0; }
+  #controles select, #controles input[type="number"] { min-width: 0; width: 100%; }
+  .tarjeta .valor { font-size: 1.4rem; }
 }
 
 [hidden] { display: none !important; }

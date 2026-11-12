@@ -20,6 +20,7 @@ Este repositorio construye un **observatorio abierto** sobre eso, por fases que 
 | **F3 · Sitio** | explorador estático: tabla de pozos con celdas "sin dato porque…", curvas tipo P10/P50/P90 con `n`, mapa Leaflet, página de método; JSON pre-agregados por el pipeline, regenerado cada mes por CI y publicado en GitHub Pages | **hecha** → [lucasburriel.github.io/vaca-muerta-abierta](https://lucasburriel.github.io/vaca-muerta-abierta/) |
 | **F4 · Preguntas en lenguaje natural** | agente local (`agente.py`, CLI y chat) y servidor MCP (`mcp_server.py`) sobre siete herramientas tipadas de solo lectura; cada resultado trae su cita (tabla, columnas, filtros, regla); un validador rechaza cualquier número que las herramientas no devolvieron; funciona con el snapshot JSON commiteado o con las tablas Parquet | **hecha** → [`docs/agente.md`](docs/agente.md), [`docs/ejemplos-agente.md`](docs/ejemplos-agente.md) |
 | **F6 · Hablar de plata** | precios públicos como una tabla más: el precio realizado del crudo en USD/m³ por provincia y mes (informe de regalías, desde 1991) y el precio del gas Res. 1/2018 en USD/MMBTU por cuenca, segmento y contrato (desde 2019), convertidos a las unidades de volumen del observatorio; una herramienta `precios` y un parámetro `valorizar` en curvas tipo, mis pozos, mi campaña, pronóstico y simulador de campaña que agrega USD por mes, acumulado y un VAN simple con tres modos de precio (histórico, flat, último publicado) y regalía opcional; **sólo ingreso bruto**, sin costos, dicho en cada resultado; las vistas MCP Apps conmutan entre m³/d y USD/mes y muestran el VAN | **hecha** → [`docs/precios.md`](docs/precios.md), ADR-034, ADR-035 |
+| **F7 · Simular en el navegador, leerlo en inglés** | el Monte Carlo de campaña en el sitio estático: `pipeline.py site` escribe las curvas P10/P50/P90 de cada grupo cohorte × formación × ventana ya extendidas a 120 meses (la misma función que usa el simulador en Python) más los precios públicos por defecto, y un Monte Carlo sembrado en JavaScript sortea las campañas en el navegador del lector: tasa agregada, acumulado, ingreso bruto y VAN con banda P10–P90, meses publicados y extrapolados en una tarjeta, cada salvedad en la página; todo el sitio en español e inglés con un solo juego de páginas (`?lang=en`) | **hecha** → [simulador](https://lucasburriel.github.io/vaca-muerta-abierta/simulador.html), [`docs/simulacion.md`](docs/simulacion.md), ADR-036, ADR-037 |
 | **F5 · Compará tus pozos** | módulo «mis datos»: cargás tu producción mensual (CSV/Parquet) en la sesión y comparás cada pozo con la curva tipo publicada de su cohorte × formación × ventana, cada campaña con sus medianas públicas, brechas contra el P50, vecinos en un mapa; ajustes de declinación Arps/Duong con EUR y banda bootstrap, Monte Carlo de campaña desde las curvas publicadas; vistas MCP Apps en Claude Desktop con texto de respaldo; `vma-mcp` instalable con `uvx`; cinco datasets públicos más catalogados (reservas, precios, regalías, producción por yacimiento, concesiones); un dataset sintético para tests y demos. Tus datos no salen de tu máquina | **hecha** → [Para operadoras](#para-operadoras-compará-tus-pozos-f5-02-11-2026), [`docs/mis-datos.md`](docs/mis-datos.md), [`docs/simulacion.md`](docs/simulacion.md), [`docs/mcp-apps.md`](docs/mcp-apps.md) |
 
 ## Para operadoras: compará tus pozos (F5, 02-11-2026)
@@ -132,7 +133,22 @@ build ni backend; HTML + módulos ES que leen JSON pre-agregados que `python pip
 publicadas (ADR-021, ADR-022). Cada número lleva su `tabla.columna`; cada celda vacía dice por qué (los `flags` de la
 fila); cada tasa aclara que es por día efectivo. Se regenera el 5 de cada mes (ADR-024). Páginas: inicio, explorador
 de pozos (filtros, orden, descarga CSV), curvas tipo (nivel, formación, ventana/operadora, cohortes, outliers, eje
-log), mapa (color por IP90/m o por categoría), método y fuentes (hashes del manifiesto, tablas, reglas, licencias).
+log), simulador de campaña (abajo), mapa (color por IP90/m o por categoría), método y fuentes (hashes del
+manifiesto, tablas, reglas, licencias).
+
+**También en inglés (F7, 12-11-2026).** Cada página tiene un conmutador ES | EN; `?lang=en` la abre en inglés y los
+enlaces lo conservan. Un solo juego de páginas: el español en el HTML, el inglés en `site/js/i18n.js`, números con
+el formato de cada idioma; los nombres de columnas, los flags y los ADR no se traducen (ADR-037).
+
+**Simulador de campaña (F7).** [`simulador.html`](https://lucasburriel.github.io/vaca-muerta-abierta/simulador.html):
+se elige formación, ventana de fluido y cohorte de referencia, cantidad de pozos, pozos por mes, rama, horizonte,
+uptime, precios, tasa de descuento y regalía; el navegador sortea 500 campañas desde la curva tipo publicada y
+muestra la tasa agregada, el acumulado, el ingreso bruto por mes y acumulado con la banda P10–P90, y tarjetas con
+el VAN del ingreso bruto, el acumulado por pozo, el pico y cuántos meses son extrapolados más allá de la curva
+publicada. Las curvas llegan ya extendidas por el pipeline (`site/data/simulador.json`, la misma función que usa
+el simulador en Python); el Monte Carlo es `site/js/montecarlo.js`, sembrado y reproducible, y un test lo compara
+con `vma.simulacion.campania.simular` usando Node (ADR-036). Es un muestreo de curvas de declinación de un grupo
+público de pozos: sin interferencia, sin instalaciones, sin costos, sólo ingreso bruto, y la página lo dice.
 
 ![sitio: curvas tipo](docs/sitio-curvas.png)
 
@@ -209,7 +225,7 @@ Informe completo: [`informes/calidad-2026-10-30.md`](informes/calidad-2026-10-30
 ```bash
 git clone https://github.com/LucasBurriel/vaca-muerta-abierta && cd vaca-muerta-abierta
 pip install -e ".[dev]"
-python -m pytest -q            # 178 tests, sin red, sin datos, sin modelo
+python -m pytest -q            # 242 tests, sin red, sin datos, sin modelo (con Node, también corre el Monte Carlo del navegador)
 
 python pipeline.py sources     # el catálogo (vma/sources.py)
 python pipeline.py download    # ~460 MB -> data/raw/<hoy>/ + manifest.json (URL, bytes, sha256, last_modified de CKAN)
@@ -219,7 +235,7 @@ python pipeline.py master      # data/publicado/<hoy>/pozos.{csv,parquet} + info
 python pipeline.py diff        # informes/diff-<a>-<b>.md entre las dos últimas descargas (o --a/--b)
 python pipeline.py indicadores # data/publicado/<hoy>/indicadores.{csv,parquet}  (~10 s)
 python pipeline.py curvas      # data/publicado/<hoy>/curvas_tipo.{csv,parquet} + informes/indicadores-<hoy>.md + docs/indicadores-*.png
-python pipeline.py site        # site/data/*.json (+ meta.json) para el sitio estático
+python pipeline.py site        # site/data/*.json (+ meta.json, + simulador.json) para el sitio estático
 cd site && python -m http.server 8000   # abrir http://localhost:8000
 
 pip install -e ".[dev,agente]"  # F4: anthropic + mcp
@@ -253,7 +269,7 @@ Las decisiones (nombre, alcance, clave de pozo, unidades, relación con `capiv`,
 alias, fechas de relleno, formato de publicación, grano de los indicadores, tasas por día efectivo, mínimo de pozos,
 regla de outliers, umbral de rama, ventana de fluido, stack del sitio, JSON vs Parquet en el navegador, recortes del
 sitio, cadencia mensual, agente local + MCP sin SQL libre, doble fuente Parquet/JSON, validador de citas, modelo y
-mock) están en [docs/decisiones.md](docs/decisiones.md).
+mock, simulador en el navegador, sitio en dos idiomas) están en [docs/decisiones.md](docs/decisiones.md).
 
 ## Licencia
 

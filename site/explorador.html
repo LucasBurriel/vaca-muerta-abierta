@@ -3,37 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Explorador de pozos · Vaca Muerta abierta</title>
+<title data-i18n="explorador.title">Explorador de pozos · Vaca Muerta abierta</title>
+<meta name="description" data-i18n-attr="content:explorador.desc" content="Una fila por pozo físico de la cuenca Neuquina no convencional: rama, etapas, IP90 y acumulados por metro, GOR, corte de agua, con el motivo de cada dato faltante.">
 <link rel="stylesheet" href="css/estilo.css">
+<script src="js/idioma.js"></script>
 </head>
 <body>
 <header class="top"><div class="wrap">
   <a class="brand" href="index.html">Vaca Muerta abierta</a>
   <nav>
-    <a href="index.html" data-pagina="inicio">Inicio</a>
-    <a href="explorador.html" data-pagina="explorador">Explorador de pozos</a>
-    <a href="curvas.html" data-pagina="curvas">Curvas tipo</a>
-    <a href="mapa.html" data-pagina="mapa">Mapa</a>
-    <a href="metodo.html" data-pagina="metodo">Método y fuentes</a>
+    <a href="index.html" data-pagina="inicio" data-i18n="nav.inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador" data-i18n="nav.explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas" data-i18n="nav.curvas">Curvas tipo</a>
+    <a href="simulador.html" data-pagina="simulador" data-i18n="nav.simulador">Simulador</a>
+    <a href="mapa.html" data-pagina="mapa" data-i18n="nav.mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo" data-i18n="nav.metodo">Método y fuentes</a>
   </nav>
+  <span class="idioma" role="group" aria-label="Idioma / Language"><a href="?lang=es" data-lang="es" lang="es" title="Español">ES</a><a href="?lang=en" data-lang="en" lang="en" title="English">EN</a></span>
   <span class="fecha"></span>
 </div></header>
 
 <main class="wrap">
-  <h1>Explorador de pozos</h1>
-  <p class="lead">Una fila por pozo físico de la tabla <code>indicadores</code> (coordenadas y estado desde <code>pozos</code>).
+  <h1 data-i18n="explorador.h1">Explorador de pozos</h1>
+  <p class="lead" data-i18n="explorador.lead">Una fila por pozo físico de la tabla <code>indicadores</code> (coordenadas y estado desde <code>pozos</code>).
   Los valores por metro existen solo cuando la rama se conoce y mide 500 m o más; donde falta un dato, la celda dice <b>por qué</b>
   (pasá el mouse). Las tasas son por día efectivo de producción, no por día calendario.</p>
 
   <div class="filtros">
-    <label>Operadora <select id="f-operadora"></select></label>
-    <label>Formación <select id="f-formacion"></select></label>
-    <label>Cohorte <select id="f-cohorte"></select></label>
-    <label>Ventana <select id="f-ventana"></select></label>
-    <label>Buscar sigla <input id="f-sigla" type="search" placeholder="YPF.Nq.LACh-"></label>
-    <label class="check"><input id="f-alcance" type="checkbox" checked> solo en alcance (Neuquina no convencional)</label>
-    <label class="check"><input id="f-con-rama" type="checkbox"> solo con valores por metro</label>
-    <button id="descargar">Descargar CSV filtrado</button>
+    <label><span data-i18n="filtro.operadora">Operadora</span> <select id="f-operadora"></select></label>
+    <label><span data-i18n="filtro.formacion">Formación</span> <select id="f-formacion"></select></label>
+    <label><span data-i18n="filtro.cohorte">Cohorte</span> <select id="f-cohorte"></select></label>
+    <label><span data-i18n="filtro.ventana">Ventana</span> <select id="f-ventana"></select></label>
+    <label><span data-i18n="explorador.buscar">Buscar sigla</span> <input id="f-sigla" type="search" placeholder="YPF.Nq.LACh-"></label>
+    <label class="check"><input id="f-alcance" type="checkbox" checked> <span data-i18n="explorador.alcance">solo en alcance (Neuquina no convencional)</span></label>
+    <label class="check"><input id="f-con-rama" type="checkbox"> <span data-i18n="explorador.con_rama">solo con valores por metro</span></label>
+    <button id="descargar" data-i18n="explorador.descargar">Descargar CSV filtrado</button>
   </div>
   <p id="resumen-filtro" class="resumen-filtro"></p>
 
@@ -43,7 +47,7 @@
   </div>
 
   <footer class="pie">
-    <p>Columnas y reglas: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a> ·
+    <p data-i18n="explorador.pie">Columnas y reglas: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a> ·
     <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/maestro.md">docs/maestro.md</a>.
     Las filas marcadas en color son outliers de IP90/m (ADR-018): están, no se borran.</p>
     <p class="meta"></p>

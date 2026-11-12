@@ -3,55 +3,60 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Curvas tipo · Vaca Muerta abierta</title>
+<title data-i18n="curvas.title">Curvas tipo · Vaca Muerta abierta</title>
+<meta name="description" data-i18n-attr="content:curvas.desc" content="Curvas tipo P10/P50/P90 por cohorte, formación, ventana de fluido y operadora, en tasa por día efectivo y por metro de rama, con el número de pozos de cada mes.">
 <link rel="stylesheet" href="css/estilo.css">
+<script src="js/idioma.js"></script>
 </head>
 <body>
 <header class="top"><div class="wrap">
   <a class="brand" href="index.html">Vaca Muerta abierta</a>
   <nav>
-    <a href="index.html" data-pagina="inicio">Inicio</a>
-    <a href="explorador.html" data-pagina="explorador">Explorador de pozos</a>
-    <a href="curvas.html" data-pagina="curvas">Curvas tipo</a>
-    <a href="mapa.html" data-pagina="mapa">Mapa</a>
-    <a href="metodo.html" data-pagina="metodo">Método y fuentes</a>
+    <a href="index.html" data-pagina="inicio" data-i18n="nav.inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador" data-i18n="nav.explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas" data-i18n="nav.curvas">Curvas tipo</a>
+    <a href="simulador.html" data-pagina="simulador" data-i18n="nav.simulador">Simulador</a>
+    <a href="mapa.html" data-pagina="mapa" data-i18n="nav.mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo" data-i18n="nav.metodo">Método y fuentes</a>
   </nav>
+  <span class="idioma" role="group" aria-label="Idioma / Language"><a href="?lang=es" data-lang="es" lang="es" title="Español">ES</a><a href="?lang=en" data-lang="en" lang="en" title="English">EN</a></span>
   <span class="fecha"></span>
 </div></header>
 
 <main class="wrap">
-  <h1>Curvas tipo</h1>
-  <p class="lead">Distribución, mes a mes desde la primera producción, de la tasa de cada pozo del grupo: P50 con banda P10–P90
+  <h1 data-i18n="curvas.h1">Curvas tipo</h1>
+  <p class="lead" data-i18n="curvas.lead">Distribución, mes a mes desde la primera producción, de la tasa de cada pozo del grupo: P50 con banda P10–P90
   (convención petrolera: P10 es el caso alto). Tabla <code>curvas_tipo</code>; nada se publica con menos de 5 pozos (ADR-017).</p>
-  <div class="nota"><b>Las tasas son por día efectivo de producción</b> (<code>volumen / tef</code>), no por día calendario:
+  <div class="nota" data-i18n="curvas.nota"><b>Las tasas son por día efectivo de producción</b> (<code>volumen / tef</code>), no por día calendario:
   un mes con paradas da la tasa de los días que produjo. Son mayores que una tasa calendario en el factor de inactividad (ADR-016).</div>
 
   <div class="filtros">
-    <label>Nivel <select id="f-nivel">
-      <option value="cohorte_formacion">cohorte × formación</option>
-      <option value="cohorte_formacion_ventana">cohorte × formación × ventana</option>
-      <option value="cohorte_formacion_operadora">cohorte × formación × operadora</option>
+    <label><span data-i18n="curvas.nivel">Nivel</span> <select id="f-nivel">
+      <option value="cohorte_formacion" data-i18n="curvas.nivel.cf">cohorte × formación</option>
+      <option value="cohorte_formacion_ventana" data-i18n="curvas.nivel.cfv">cohorte × formación × ventana</option>
+      <option value="cohorte_formacion_operadora" data-i18n="curvas.nivel.cfo">cohorte × formación × operadora</option>
     </select></label>
-    <label>Formación <select id="f-formacion"></select></label>
-    <label id="l-ventana" hidden>Ventana <select id="f-ventana"></select></label>
-    <label id="l-operadora" hidden>Operadora <select id="f-operadora"></select></label>
-    <label>Cohortes <select id="f-cohorte" multiple size="4"></select></label>
-    <label>Tasa <select id="f-tasa"></select></label>
-    <label class="check"><input id="f-outliers" type="checkbox"> incluir outliers (ADR-018)</label>
-    <label class="check"><input id="f-banda" type="checkbox" checked> banda P10–P90</label>
-    <label class="check"><input id="f-log" type="checkbox"> eje log</label>
+    <label><span data-i18n="filtro.formacion">Formación</span> <select id="f-formacion"></select></label>
+    <label id="l-ventana" hidden><span data-i18n="filtro.ventana">Ventana</span> <select id="f-ventana"></select></label>
+    <label id="l-operadora" hidden><span data-i18n="filtro.operadora">Operadora</span> <select id="f-operadora"></select></label>
+    <label><span data-i18n="curvas.cohortes">Cohortes</span> <select id="f-cohorte" multiple size="4"></select></label>
+    <label><span data-i18n="curvas.tasa">Tasa</span> <select id="f-tasa"></select></label>
+    <label class="check"><input id="f-outliers" type="checkbox"> <span data-i18n="curvas.outliers">incluir outliers (ADR-018)</span></label>
+    <label class="check"><input id="f-banda" type="checkbox" checked> <span data-i18n="curvas.banda">banda P10–P90</span></label>
+    <label class="check"><input id="f-log" type="checkbox"> <span data-i18n="curvas.log">eje log</span></label>
   </div>
   <p id="resumen-filtro" class="resumen-filtro"></p>
 
   <div id="grafico" class="grafico"></div>
   <div id="grafico-n" class="grafico" style="height:180px;margin-top:0.5rem"></div>
-  <p class="resumen-filtro">Arriba: P50 (línea) y P10–P90 (banda) de la tasa elegida. Abajo: <code>n_pozos</code> por mes
-  (pozos con días efectivos ese mes; los que paran no cuentan). Hasta el mes 60 (ADR-023).</p>
+  <p class="resumen-filtro" data-i18n="curvas.leyenda">Arriba: P50 (línea) y P10–P90 (banda) de la tasa elegida. Abajo: <code>n_pozos</code> por mes
+  (pozos con días efectivos ese mes; los que paran no cuentan). Hasta el mes 60 (ADR-023). Para proyectar una campaña desde
+  estas curvas: <a href="simulador.html">simulador</a>.</p>
 
   <div class="tabla-scroll"><table class="datos" id="tabla"><thead></thead><tbody></tbody></table></div>
 
   <footer class="pie">
-    <p>Definiciones: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a>
+    <p data-i18n="curvas.pie">Definiciones: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a>
     (sección <code>curvas_tipo</code>). Decisiones: ADR-015 a ADR-020, ADR-023.</p>
     <p class="meta"></p>
   </footer>

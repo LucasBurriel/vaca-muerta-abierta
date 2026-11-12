@@ -1698,14 +1698,14 @@ def simular_campania(
     por_metro = bool(rama_m) and d.tiene("curvas_tipo", f"{tasa}_por_m_p50")
     col = f"{tasa}_por_m" if por_metro else tasa
     curva = d.df(
-        f"SELECT mes, {col}_p10 AS p10, {col}_p50 AS p50, {col}_p90 AS p90 FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes",
+        f"SELECT mes, {col}_p10 AS p10, {col}_p50 AS p50, {col}_p90 AS p90, {'n_pozos_por_m' if por_metro else 'n_pozos'} AS n FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes",
         params,
     )
     if por_metro and curva.p50.notna().sum() < DC.MIN_PUNTOS:
         por_metro = False
         col = tasa
         curva = d.df(
-            f"SELECT mes, {col}_p10 AS p10, {col}_p50 AS p50, {col}_p90 AS p90 FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes",
+            f"SELECT mes, {col}_p10 AS p10, {col}_p50 AS p50, {col}_p90 AS p90, {'n_pozos_por_m' if por_metro else 'n_pozos'} AS n FROM curvas_tipo WHERE {' AND '.join(preds)} ORDER BY mes",
             params,
         )
     if curva.p50.notna().sum() < DC.MIN_PUNTOS:
@@ -1750,6 +1750,14 @@ def simular_campania(
     if r["meses_extrapolados"]:
         notas.append(
             f"{r['meses_extrapolados']} meses más allá de la curva publicada: extrapolados con un ajuste hiperbólico de cada cuantil (d_min {DC.D_MIN_ANUAL:.0%} anual)"
+        )
+    if r.get("meses_descartados"):
+        notas.append(
+            f"los últimos {r['meses_descartados']} meses publicados no se muestrean: tienen menos de la mitad de los pozos del grupo y la cola se empalma antes (ADR-038)"
+        )
+    if r.get("meses_acotados"):
+        notas.append(
+            f"en {r['meses_acotados']} meses extrapolados la cola del P10 o del P90 alcanzó a la del P50 y la sigue (ADR-036): la banda se angosta ahí por construcción, no por dato"
         )
     if not ventana:
         notas.append(

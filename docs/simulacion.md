@@ -69,7 +69,8 @@ Monte Carlo de `n_pozos` pozos nuevos (`vma/simulacion/campania.py`):
    en espacio de percentil (σ 8 puntos); su tasa de cada mes se lee de los P90/P50/P10 publicados de ese mes por
    interpolación log-lineal (la inversa del percentil de `comparar_mi_pozo`).
 3. Más allá del último mes publicado, cada cuantil se extiende con un ajuste hiperbólico de su cola (exponencial si
-   no ajusta), empalmado al último valor y capado por `d_min` 6 %/año; `meses_extrapolados` lo cuenta.
+   no ajusta), empalmado al último valor y capado por `d_min` 6 %/año; `meses_extrapolados` lo cuenta. Si dos colas
+   se cruzan, la del P10 o la del P90 sigue a la del P50 (`meses_acotados`, ADR-036).
 4. Los pozos entran a `ritmo_pozos_por_mes` desde el mes 0 (por defecto todos juntos). Volumen mensual = tasa ×
    30.44 días × `uptime` (0.92).
 5. `n_sim` (500) corridas; por mes de campaña P10/P50/P90 y media de la **tasa agregada** y del **acumulado**, pozos
@@ -111,6 +112,40 @@ regalías sólo con `regalia`.
   vista del simulador tiene el conmutador m³/d | USD/mes, tarjetas de VAN y los controles de precio.
 
 VAN = Σ ingreso × (1 + tasa)^(−mes/12), tasa anual 10 % por defecto, mes 0 sin descontar.
+
+## En el navegador: el simulador del sitio (ADR-036)
+
+La página [`site/simulador.html`](../site/simulador.html) corre el mismo Monte Carlo de campaña sin instalar nada.
+El reparto es simple: **el ajuste queda en Python, el sorteo pasa al navegador**.
+
+- `python pipeline.py site` escribe `site/data/simulador.json`: por grupo cohorte × formación × ventana (sin
+  outliers), los P10/P50/P90 de petróleo y gas, absolutos y por metro donde se publican, **ya extendidos a 120
+  meses** con `vma.simulacion.campania.cuantiles_extendidos`, la función que también usa `simular()`. Cada curva
+  dice cuántos meses publicados se usan, en qué mes se empalma la cola (`ultimo_mes`: el último con al menos la
+  mitad de los pozos del grupo, ADR-038), cuántos pozos tiene ese mes (`n_ultimo`), cuántos meses publicados
+  posteriores se descartaron y en cuántos meses extrapolados actuó el orden de las colas. Trae además los precios públicos por defecto (último crudo de Neuquén
+  y último gas `ppp` × `total` de la cuenca Neuquina, tabla `precios`).
+- `site/js/montecarlo.js` (sin DOM) repite los pasos 2 a 5 de `simular_campania`: posición uniforme por pozo,
+  ruido mensual de 8 puntos de percentil, interpolación log-lineal, entrada escalonada, uptime, percentiles entre
+  corridas. El generador es sembrado (mulberry32 + Box-Muller) y la página muestra la semilla. No es el PCG64 de
+  NumPy: Python y JavaScript coinciden estadísticamente, no sorteo a sorteo.
+- **La plata se calcula distinto que en la herramienta MCP**: petróleo y gas de un pozo comparten la posición, y el
+  ingreso bruto y su VAN se calculan dentro de cada corrida y después se arma la banda. En la herramienta se
+  valoriza cada cuantil del acumulado de un fluido a precio fijo. En los dos casos es ingreso bruto, sin costos.
+- **Las colas extendidas no se cruzan.** Los tres cuantiles se ajustan por separado y lejos del dato pueden
+  cruzarse; en los meses extrapolados, la cola del P10 o del P90 que alcanza a la del P50 la sigue. Los meses
+  publicados no se tocan. Como la función es compartida, vale también para `simular()` y para `simular_campania`,
+  que ahora devuelven `meses_acotados`.
+- Unidades: las métricas de la fuente por defecto; bbl, MMscf y boe como conversión declarada (6,2898 bbl/m³;
+  35,3147 ft³/m³; el boe con el factor de la Secretaría, 1.000 m³ de gas = 1 m³ de petróleo).
+
+Un límite que la página dice en cada corrida: la cola se empalma al nivel del **último mes publicado**, que en
+cualquier cohorte es el mes con menos pozos (los que arrancaron en enero). Con pocos pozos ese nivel es ruidoso y
+arrastra a toda la extrapolación; la página muestra cuántos son y avisa por debajo de 20.
+
+`tests/test_simulador_json.py` verifica el archivo (esquema, orden P10 ≥ P50 ≥ P90, continuidad en el empalme,
+tope de tamaño, precios) y `tests/test_simulador_js.py` corre `montecarlo.js` con Node y lo compara con
+`simular()`: el P50 del acumulado dentro del 3 %. Sin Node, ese test se saltea.
 
 ## Tests
 

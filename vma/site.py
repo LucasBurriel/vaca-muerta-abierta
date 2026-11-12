@@ -14,6 +14,10 @@ Files written:
 - ``pozos.json``     one entry per master well (columnar), the explorer's and the map's table.
 - ``curvas_<nivel>.json``  type curves per level, groups with at least one publishable month, ``mes <= MES_MAX``
   (ADR-023), P10/P50/P90 and ``n_pozos`` per month.
+- ``simulador.json``  what the browser campaign simulator samples (ADR-036): per cohort × formation × window
+  group, the oil and gas P10/P50/P90 curves (absolute and per metre) already extended to ``SIM_MESES`` months by
+  the same function the Python simulator uses, plus the default public prices. The one file that is not a plain
+  copy of published values: months beyond ``ultimo_mes`` are a hyperbolic extrapolation and are counted as such.
 """
 
 from __future__ import annotations
@@ -79,6 +83,16 @@ CURVAS_COLUMNS = (
     + ["fecha_descarga", "version_maestro"]
 )
 NIVELES = ["cohorte_formacion", "cohorte_formacion_ventana", "cohorte_formacion_operadora"]
+
+# simulador.json (ADR-036)
+SIM_MESES = 120  # horizon of the browser simulator: ten years
+SIM_NIVEL = "cohorte_formacion_ventana"
+SIM_CURVAS = ["petroleo_m3_d", "gas_mil_m3_d", "petroleo_m3_d_por_m", "gas_mil_m3_d_por_m"]
+SIM_MAX_BYTES = 1_500_000
+SIM_REGION_PETROLEO = "Neuquén"  # the defaults of the valuation (ADR-034)
+SIM_REGION_GAS = "Neuquina"
+SIM_SEGMENTO_GAS = "ppp"
+SIM_CONTRATO_GAS = "total"
 
 
 # --- scalar helpers -------------------------------------------------------------------------------
@@ -219,6 +233,155 @@ def build_curvas(curvas: pd.DataFrame, nivel: str, mes_max: int = MES_MAX) -> di
         "estadisticos": CURVAS_STATS,
         "tasas": CURVAS_RATES,
         "nota": "tasas por día efectivo de producción (tef), no por día calendario (ADR-016)",
+        "n_grupos": len(grupos),
+        "grupos": grupos,
+    }
+
+
+# --- simulador.json --------------------------------------------------------------------------------
+
+
+def _precio_ultimo(t: pd.DataFrame, columna: str) -> tuple[dict, pd.Series] | None:
+    t = t[t.precio_dataset.notna()]
+    if not len(t):
+        return None
+    f = t.sort_values(["anio", "mes"]).iloc[-1]
+    return {
+        "region": clean(f.region),
+        "mes": f"{int(f.anio):04d}-{int(f.mes):02d}",
+        "provisorio": bool(f.provisorio),
+        "segmento": clean(f.segmento),
+        "contrato": clean(f.contrato),
+        "fuente": clean(f.fuente),
+        "unidad_dataset": clean(f.unidad_dataset),
+        "precio_dataset": sig(float(f.precio_dataset), 5),
+        "tabla": "precios",
+        "columna": columna,
+    }, f
+
+
+def precios_simulador(precios: pd.DataFrame | None) -> dict | None:
+    """The latest public price of each product in the default regions, in the units ``valorizar.py`` uses
+    (USD/m³ and USD per mil m³) and in the ones a reader types (USD/bbl, USD/MMBTU). None without a prices table."""
+    from vma import units
+
+    if precios is None or not len(precios):
+        return None
+    out: dict = {
+        "petroleo": None,
+        "gas": None,
+        "fecha_realizacion": None,
+        "fecha_descarga": clean(precios.fecha_descarga.iloc[0]),
+        "regla": "último mes publicado de cada producto en la región por defecto (ADR-034, ADR-035)",
+        "licencia": "CC-BY 4.0, Secretaría de Energía de la Nación Argentina",
+    }
+    pe = _precio_ultimo(
+        precios[(precios.producto == "petroleo") & (precios.region == SIM_REGION_PETROLEO)], "precio_usd_m3"
+    )
+    if pe:
+        d, f = pe
+        d["usd_m3"] = sig(float(f.precio_usd_m3), 5)
+        d["usd_bbl"] = sig(float(f.precio_usd_m3) / units.BBL_PER_M3, 5)
+        out["petroleo"] = d
+        out["fecha_realizacion"] = clean(f.fecha_realizacion)
+    ga = _precio_ultimo(
+        precios[
+            (precios.producto == "gas")
+            & (precios.region == SIM_REGION_GAS)
+            & (precios.segmento == SIM_SEGMENTO_GAS)
+            & (precios.contrato == SIM_CONTRATO_GAS)
+        ],
+        "precio_usd_mil_m3",
+    )
+    if ga:
+        d, f = ga
+        d["usd_mmbtu"] = sig(float(f.precio_dataset), 5)
+        d["usd_mil_m3"] = sig(float(f.precio_usd_mil_m3), 5)
+        out["gas"] = d
+    return out if (out["petroleo"] or out["gas"]) else None
+
+
+def build_simulador(
+    curvas: pd.DataFrame, precios: pd.DataFrame | None = None, meses: int = SIM_MESES
+) -> dict:
+    """What the browser Monte Carlo samples (ADR-036): for every cohort × formation × window group without
+    outliers, the P10/P50/P90 of oil and gas (absolute and per metre where published) extended to ``meses`` months
+    with ``vma.simulacion.campania.cuantiles_extendidos``, the function the Python simulator itself uses. A curve
+    with fewer than ``MIN_PUNTOS`` usable months is left out; a group with no curve left is dropped."""
+    from vma import units
+    from vma.simulacion import campania as SC
+    from vma.simulacion import declinacion as DC
+
+    c = curvas[(curvas.nivel == SIM_NIVEL) & curvas.incluye_outliers.eq(False)]
+    grupos = []
+    for key, g in c.groupby(["cohorte", "formacion", "ventana"], dropna=True, sort=True):
+        g = g.sort_values("mes")
+        series: dict[str, dict] = {}
+        for col in SIM_CURVAS:
+            if f"{col}_p50" not in g:
+                continue
+            n_col = "n_pozos_por_m" if col.endswith("_por_m") else "n_pozos"
+            cu = g[["mes", f"{col}_p10", f"{col}_p50", f"{col}_p90", n_col]].set_axis(
+                ["mes", "p10", "p50", "p90", "n"], axis=1
+            )
+            n_mes = g.set_index("mes")[n_col]
+            try:
+                e = SC.cuantiles_extendidos(cu, meses)
+            except SC.ErrorSimulacion:
+                continue
+            validos = [bool(v) for v in e["valido"]]
+            if sum(validos) < DC.MIN_PUNTOS:  # e.g. an old cohort published only beyond the horizon
+                continue
+            largo = max(i for i, v in enumerate(validos) if v) + 1
+            series[col] = {
+                **{
+                    s: [sig(float(e[s][i])) if validos[i] else None for i in range(largo)]
+                    for s in CURVAS_STATS
+                },
+                "publicados": int(sum(validos[: min(e["ultimo_mes"], meses - 1) + 1])),  # within the horizon
+                "ultimo_mes": min(e["ultimo_mes"], meses - 1),
+                "validos": int(sum(validos)),
+                "acotados": e["meses_acotados"],
+                "descartados": e[
+                    "meses_descartados"
+                ],  # published months after the splice, not sampled (ADR-038)
+                # wells behind the splice month: the level the extrapolated tail starts from
+                "n_ultimo": clean(n_mes.get(e["ultimo_mes"])),
+            }
+        if not series:
+            continue
+        cohorte, formacion, ventana = key
+        grupos.append(
+            {
+                "cohorte": int(cohorte),
+                "formacion": clean(formacion),
+                "ventana": clean(ventana),
+                "n_pozos": clean(g["n_pozos"].iloc[0]),
+                "n_pozos_por_m": clean(g["n_pozos_por_m"].iloc[0]),
+                "curvas": series,
+            }
+        )
+    return {
+        "tabla": "curvas_tipo",
+        "nivel": SIM_NIVEL,
+        "incluye_outliers": False,
+        "meses": meses,
+        "estadisticos": CURVAS_STATS,
+        "tasas": SIM_CURVAS,
+        "min_puntos": DC.MIN_PUNTOS,
+        "d_min_anual": DC.D_MIN_ANUAL,
+        "dias_mes": SC.DIAS_MES,
+        "jitter_percentil": 8.0,
+        "uptime": 0.92,
+        "bbl_por_m3": units.BBL_PER_M3,
+        "ft3_por_m3": units.FT3_PER_M3,
+        "mmbtu_por_mil_m3": units.MMBTU_PER_THOUSAND_M3,
+        "nota": (
+            "tasas por día efectivo de producción (ADR-016); hasta ultimo_mes son los P10/P50/P90 publicados "
+            "(curvas_tipo), después una extrapolación hiperbólica de cada cuantil empalmada al último valor, con "
+            "declinación terminal d_min_anual y las colas ordenadas (ADR-031, ADR-036)"
+        ),
+        "precios": precios_simulador(precios),
         "n_grupos": len(grupos),
         "grupos": grupos,
     }
@@ -384,6 +547,12 @@ def build_site_data(
         archivos[f"curvas_{nivel}.json"] = _dump(
             out_dir / f"curvas_{nivel}.json", build_curvas(curvas, nivel, mes_max)
         )
+    precios_sim = precios
+    if precios_sim is None and (out_dir / "precios.json").exists():  # the committed snapshot (ADR-034)
+        from vma.precios.fuentes import desde_json
+
+        precios_sim = desde_json(json.loads((out_dir / "precios.json").read_text(encoding="utf-8")))
+    archivos["simulador.json"] = _dump(out_dir / "simulador.json", build_simulador(curvas, precios_sim))
     archivos["resumen.json"] = _dump(out_dir / "resumen.json", build_resumen(ind, master, curvas))
     fecha_descarga = clean(ind.fecha_descarga.iloc[0]) if len(ind) and "fecha_descarga" in ind else None
     tablas = {
@@ -391,11 +560,29 @@ def build_site_data(
         "indicadores": (len(ind), len(ind.columns)),
         "curvas_tipo": (len(curvas), len(curvas.columns)),
     }
+    if precios is not None:  # the simulator cites it; the snapshot alone does not know the table's size
+        tablas["precios"] = (len(precios), len(precios.columns))
     meta = build_meta(manifest, version_maestro, fecha_descarga, tablas, archivos, today)
     archivos["meta.json"] = _dump(out_dir / "meta.json", meta)
     meta["archivos"] = archivos
     _dump(out_dir / "meta.json", meta)
     return meta
+
+
+def _manifest_de_las_tablas(root: Path, ultimo: Path) -> dict:
+    """The manifest the method page shows: the newest download that carries the production file the tables are
+    built from. An opt-in download made later (``download regalias_crudo precios_gas`` writes its own dated folder
+    with only those two files) must not replace it; without any such folder, the newest manifest as before."""
+    dias = sorted((p for p in ultimo.parent.iterdir() if p.is_dir()), reverse=True)
+    for dia in dias:
+        ruta = dia / "manifest.json"
+        if not ruta.exists():
+            continue
+        m = json.loads(ruta.read_text(encoding="utf-8"))
+        if any(s.get("key") == "produccion_nc" for s in m.get("sources", [])):
+            return m
+    ruta = ultimo / "manifest.json"
+    return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else {}
 
 
 def run(root: Path, today: date | None = None) -> Path:
@@ -410,8 +597,7 @@ def run(root: Path, today: date | None = None) -> Path:
     ind = pd.read_parquet(pub / "indicadores.parquet")
     curvas = pd.read_parquet(pub / "curvas_tipo.parquet")
     precios = pd.read_parquet(pub / "precios.parquet") if (pub / "precios.parquet").exists() else None
-    manifest_path = latest_raw_dir(root) / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+    manifest = _manifest_de_las_tablas(root, latest_raw_dir(root))
     out_dir = root / "site" / "data"
     meta = build_site_data(out_dir, master, ind, curvas, manifest, pub.name, today, precios=precios)
     total = sum(meta["archivos"].values())
@@ -426,14 +612,19 @@ __all__ = [
     "CURVAS_RATES",
     "MES_MAX",
     "NIVELES",
+    "SIM_CURVAS",
+    "SIM_MAX_BYTES",
+    "SIM_MESES",
     "POZOS_FROM_INDICADORES",
     "POZOS_FROM_MAESTRO",
     "build_curvas",
     "build_meta",
     "build_pozos",
     "build_resumen",
+    "build_simulador",
     "build_site_data",
     "encode_flags",
+    "precios_simulador",
     "run",
     "sig",
 ]

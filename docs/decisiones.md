@@ -641,3 +641,110 @@ every block says in words that it is gross revenue with no costs. What is delibe
 `docs/precios.md`; the user who has costs can subtract them from `ingreso_usd` knowing exactly what it contains.
 The defaults to revisit are the 10 % rate, the "mes0 = January of the cohort" convention for a type curve under
 the historical mode, and the Neuquén / Neuquina fallback for the user's own wells, which carry no province.
+## ADR-036 · The campaign simulator in the browser: quantile curves extended by the pipeline, Monte Carlo in JavaScript (2026-11-12)
+
+**Context.** The campaign Monte Carlo (ADR-031) lived only in Python, behind the MCP server: a reader of the site
+could look at type curves but not ask "what would twelve of these wells do?". The site is static (ADR-021), reads
+pre-aggregated JSON (ADR-022) and cuts the curves at month 60 (ADR-023). The simulator needs three things the
+site did not have: the curves beyond month 60, the extension beyond the last published month (a least-squares
+hyperbolic fit per quantile on a grid of `b`), and the sampling itself.
+
+**Decision.** The fit stays in Python and the sampling moves to the browser.
+
+- `python pipeline.py site` also writes `site/data/simulador.json`: for every cohort × formation × window group
+  without outliers, the P10/P50/P90 of oil and gas, absolute and per metre where published, **already extended to
+  120 months** by `vma.simulacion.campania.cuantiles_extendidos`. `simular()` was refactored to call the same
+  function, so the browser samples exactly the curves the Python simulator samples; nothing is fitted in
+  JavaScript. Values carry 4 significant digits; each curve says how many months are published, the last published
+  month, how many wells are behind that month (`n_ultimo`), and how many extrapolated months the order guard
+  touched. A curve with fewer than 6 usable months is left out and a group with no curve left is dropped. On the
+  2026-10-31 tables: 98 groups, 240 curves, 0.62 MB (cap 1.5 MB, tested). The file also carries the default
+  prices: the last published crude price of Neuquén and gas price of the Neuquina basin (`ppp` × `total`,
+  ADR-034) from the `precios` table, in USD/m³ and USD per mil m³ as `valorizar.py` uses them and in USD/bbl and
+  USD/MMBTU as a reader types them, with month, provisional flag and citation; without the table the committed
+  `precios.json` snapshot gives the same numbers.
+- `site/js/montecarlo.js` is a DOM-free ES module that mirrors `simular()` step by step: a uniform position per
+  well, a monthly jitter of 8 percentile points, log-linear interpolation between the quantiles, staggered starts,
+  the uptime factor, P10/P50/P90 across simulations with NumPy's linear percentile. The generator is seeded
+  (mulberry32 + Box-Muller) and the page shows the seed: the same seed repeats the result. It is not NumPy's
+  PCG64, so Python and JavaScript agree statistically, not draw by draw; `tests/test_simulador_js.py` runs the
+  module under Node and checks the cumulative P50 within 3 % of `simular()` (skipped when Node is absent; the
+  site itself still needs no Node).
+- The page runs it in chunks on the main thread, yielding between chunks, instead of in a Web Worker: 500
+  campaigns of 12 wells take well under a second, 2,000 of 500 wells a few seconds with the page responsive, and
+  one module serves the page and the test.
+- **Money differs from the MCP tool, on purpose.** There (ADR-035) each quantile of the cumulative band of one
+  fluid is valued at a fixed price. Here oil and gas of a well share the well's position, and gross revenue and
+  its NPV are computed **inside every simulation** and banded afterwards, so the revenue band is the band of the
+  campaign and not an envelope. It is still gross revenue: no capex, no opex, no transport, no taxes, royalty only
+  if the reader types one; the NPV is of gross revenue, not profit, and the page says so next to the number.
+- **Units.** The source's metric units stay the default. A switch shows field units as a declared conversion
+  (1 m³ = 6.2898 bbl, 1 m³ = 35.3147 ft³; MMbbl, MMscf/d, Bcf), and one card gives oil + gas in boe with the
+  Secretaría's own factor (1,000 m³ of gas = 1 m³ of oil, 5.61 Mcf per boe), stated as such because it is not
+  the usual 6.
+- **The extended tails cannot cross.** The three quantiles are fitted one by one; far from the data the fits can
+  cross (47 of the 240 curves do, somewhere before month 120), which would turn the band inside out. In the
+  extrapolated months a P10 or P90 tail that meets the P50 tail follows it from there on; published months are
+  never touched. This lives in the shared function, so it also changes the Python simulator and the MCP tool in
+  those cases; the result reports `meses_acotados` and the page says the band narrows there by construction.
+
+**Consequences.** The site has one page that computes, and it says so (method page, footer of the simulator). The
+honesty rules are on the page, not in a tooltip: P10 is the high case; rates are per producing day; no
+interference between wells, no facility constraints, no costs; the band is only the dispersion the published type
+curve shows; months beyond the published curve are a hyperbolic extrapolation, counted on a card and marked on
+the charts. It is a statistical group of public wells, not a forecast of any operator's plan. To revisit: (1) the
+tail is spliced at the level of the **last published month**, which by construction is the month with the fewest
+wells of a cohort (7 wells for Vaca Muerta oil 2024, whose P90 doubles in that month); the page prints that count
+and warns below 20 wells, but the rule itself (ADR-031) deserves a sturdier anchor; (2) the order guard is the
+smallest fix that keeps the documented method, and a constant log-spread around the P50 tail is the alternative;
+(3) persistent percentile ranks with oil and gas fully correlated is an assumption, declared; (4) `pipeline.py
+site` now reads the manifest of the newest download that carries the production file, because a later opt-in
+price download writes its own dated folder and would otherwise replace the sources shown on the method page.
+
+## ADR-037 · The site in two languages: one set of pages, Spanish in the markup, an English dictionary, `?lang=` (2026-11-12)
+
+**Context.** The site was Spanish only. Readers outside Argentina do not read Spanish, and a second tree of pages
+(`en/`) would double every page and drift.
+
+**Decision.** One set of HTML pages. Spanish stays where it is used and is the default (`<html lang="es">`):
+static text carries `data-i18n="key"` (attributes: `data-i18n-attr="content:key"`), and strings built in
+JavaScript go through `t("key", "texto en español con {variable}", vars)`. `site/js/i18n.js` holds the English of
+every key and nothing else: no build step, no library, no JSON to fetch. A small classic script in `<head>`
+(`js/idioma.js`) picks the language before the first paint: `?lang=en|es`, then the choice saved by the header
+switch (localStorage, in a try/catch), then `navigator.language` (anything that does not start with `es` reads
+English); it sets `<html lang>` and hides the body until the English is in, with a timeout so a failure never
+leaves a blank page. The ES | EN switch reloads the page with `?lang=`; `<title>` and the meta description are
+translated like any other element; internal links keep `?lang=` when the language came from the URL, so a shared
+English link stays English. Numbers follow the language (`es-AR` / `en-US`).
+
+What is never translated: column and table names (`ip90_petroleo_m3_d`, `curvas_tipo`), flags, ADR numbers,
+operator and formation names, and the values of the tables (`petroleo`, `volatil_condensado`). The English uses
+the industry's terms (type curve, lateral length, stages, proppant, water cut, GOR, producing day, vintage, P10
+high case) and keeps the source's metric units; `mil m³` reads `thousand m³`. `tests/test_i18n.py` checks that
+every key used has its English and none is left over, that the English keeps the same `{variables}`, ADR numbers
+and identifiers, that every page has the switch and the early script, and, with Node, `t()` and the links.
+
+**Consequences.** Adding a string means writing it twice, in two files, and the test fails if the English is
+missing. The rule texts that `resumen.json` carries stay Spanish in the data and have their English in the
+dictionary under `regla.<key>`. The reports and part of the documentation linked from the site are Spanish and the
+English says so next to each link. Search engines see the Spanish markup; the English exists after JavaScript
+runs, which is acceptable for a site whose pages need JavaScript to show any number.
+
+## ADR-038 · The extrapolated tail is spliced where half of the group's wells remain (2026-11-12)
+
+**Context.** The type curve of a young cohort is published while `n_pozos >= 5` (ADR-017), so its last months
+are the few oldest wells of the vintage. Their quantiles are not comparable with the months before: in Vaca
+Muerta 2024 the P50 of oil goes from 24 m³/d with 58 wells (month 31) to 49 m³/d with 16 (month 32). The
+tail was spliced at the last published month, so that jump set the level of every extrapolated month and showed
+as a step in the simulated campaign rate.
+
+**Decision.** `cuantiles_extendidos` takes the well count per month (`n`) and samples the published curve only up
+to the last month with at least `FRAC_BASE = 0.5` of the group's peak count; later published months are replaced
+by the extrapolation and counted in `meses_descartados` (`descartados` in `simulador.json`). `ultimo_mes` is the
+splice month and `n_ultimo` its well count. Without `n` nothing changes. The published curve itself
+(`curvas_tipo`, the curves page) is untouched: this is a rule of the simulator, said in its notes.
+
+**Consequences.** `simular_campania` and the browser simulator change in the same way: 165 of 240 curves of
+`simulador.json` drop at least one month. The half-count rule is a common convention for type wells, not a
+fitted threshold; jumps inside the kept months of small groups are published data and stay.
+

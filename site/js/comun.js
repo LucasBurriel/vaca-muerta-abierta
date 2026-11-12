@@ -1,5 +1,8 @@
 // Shared helpers for the static site: data loading, number formatting, citations, column labels.
 // Every number shown on a page carries the table and column it came from (`cita`).
+// Text is Spanish here; the English of every string is in i18n.js under the key passed to t() (ADR-037).
+
+import { LOCALE, t } from "./i18n.js";
 
 const cache = new Map();
 
@@ -25,22 +28,30 @@ export function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
-const fmtInt = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 0 });
+const fmtInt = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 });
 
 export function num(v, dec = 3) {
   if (v === null || v === undefined || Number.isNaN(v)) return null;
   if (Number.isInteger(v) && dec === 0) return fmtInt.format(v);
   const abs = Math.abs(v);
   const d = dec === "auto" ? (abs >= 100 ? 0 : abs >= 1 ? 2 : 3) : dec;
-  return new Intl.NumberFormat("es-AR", { minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
+  return new Intl.NumberFormat(LOCALE, { minimumFractionDigits: d, maximumFractionDigits: d }).format(v);
 }
 
 export function entero(v) {
   return v === null || v === undefined ? null : fmtInt.format(v);
 }
 
-// Labels and units of the columns shown on the site (names are the tables' column names, never translated).
-export const ETIQUETAS = {
+// [label, unit] pairs keyed by column: Spanish here, English in i18n.js under `<prefix>.<column>` (label) and
+// `<prefix>.<column>.u` (unit). The keys are the tables' column names and are never translated.
+function par(prefijo, tabla) {
+  return Object.fromEntries(
+    Object.entries(tabla).map(([k, [etiqueta, unidad]]) => [k, [t(`${prefijo}.${k}`, etiqueta), unidad ? t(`${prefijo}.${k}.u`, unidad) : ""]]),
+  );
+}
+
+// Labels and units of the columns shown on the site.
+export const ETIQUETAS = par("etq", {
   sigla: ["Sigla", ""],
   operadora: ["Operadora", ""],
   formacion: ["Formación", ""],
@@ -68,16 +79,16 @@ export const ETIQUETAS = {
   estado: ["Estado", ""],
   tipo_pozo: ["Tipo de pozo", ""],
   primera_produccion: ["Primera producción", "mes"],
-};
+});
 
-export const TASAS = {
+export const TASAS = par("tasa", {
   equivalente_m3_d_por_m: ["Equivalente por metro", "m³ eq/d por m de rama"],
   petroleo_m3_d_por_m: ["Petróleo por metro", "m³/d por m de rama"],
   gas_mil_m3_d_por_m: ["Gas por metro", "mil m³/d por m de rama"],
   equivalente_m3_d: ["Equivalente", "m³ eq/d"],
   petroleo_m3_d: ["Petróleo", "m³/d"],
   gas_mil_m3_d: ["Gas", "mil m³/d"],
-};
+});
 
 // Why a value is null: the flags of the row that explain each null column (docs/indicadores.md).
 const MOTIVOS = {
@@ -93,7 +104,7 @@ const MOTIVOS = {
   ventana: ["sin_produccion", "nunca_produjo", "gor12_sin_petroleo"],
 };
 
-export const DESCRIPCION_FLAGS = {
+const FLAGS_ES = {
   fuera_alcance: "fuera del alcance (no es Neuquina no convencional, ADR-002)",
   sin_produccion: "sin registro de producción (pozo solo con fractura)",
   nunca_produjo: "hay registros pero petróleo y gas siempre 0",
@@ -125,8 +136,10 @@ export const DESCRIPCION_FLAGS = {
   outlier_ip90_m_bajo: "outlier bajo de IP90/m dentro de su formación (ADR-018)",
   outlier_no_evaluado: "no evaluado para outliers (sin IP90/m o formación chica)",
 };
+export const DESCRIPCION_FLAGS = Object.fromEntries(Object.entries(FLAGS_ES).map(([k, v]) => [k, t(`flag.${k}`, v)]));
 
-export function motivoNulo(columna, flags) {
+/** The reason a column is null in a row, from its flags; null when no flag explains it. */
+export function razonNulo(columna, flags) {
   let claves = MOTIVOS[columna];
   if (!claves) {
     if (columna.endsWith("_por_m")) claves = MOTIVOS.por_m.concat(columna.startsWith("ip90") ? MOTIVOS.ip90 : MOTIVOS.acum12);
@@ -135,8 +148,13 @@ export function motivoNulo(columna, flags) {
     else claves = [];
   }
   const hit = claves.filter((k) => flags.includes(k));
-  if (!hit.length) return "sin dato: la fuente no lo trae";
-  return "sin dato porque: " + hit.map((k) => DESCRIPCION_FLAGS[k] || k).join("; ");
+  return hit.length ? hit.map((k) => DESCRIPCION_FLAGS[k] || k).join("; ") : null;
+}
+
+export function motivoNulo(columna, flags) {
+  const razon = razonNulo(columna, flags);
+  if (!razon) return t("nulo.fuente", "sin dato: la fuente no lo trae");
+  return t("nulo.porque", "sin dato porque: {razon}", { razon });
 }
 
 // Columnar table -> row object accessor without copying everything.
@@ -153,7 +171,7 @@ export function distintos(valores) {
   );
 }
 
-export function llenarSelect(sel, valores, { todo = "todas" } = {}) {
+export function llenarSelect(sel, valores, { todo = t("sel.todas", "todas") } = {}) {
   const prev = sel.value;
   sel.innerHTML = `<option value="">${todo}</option>` + valores.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join("");
   if ([...sel.options].some((o) => o.value === prev)) sel.value = prev;
@@ -162,16 +180,21 @@ export function llenarSelect(sel, valores, { todo = "todas" } = {}) {
 export async function cabecera(activa) {
   const meta = await cargar("meta.json");
   const el = document.querySelector("header.top .fecha");
-  if (el) el.innerHTML = `datos descargados el <b>${esc(meta.fecha_descarga)}</b> · maestro <b>${esc(meta.version_maestro)}</b>`;
+  if (el) {
+    el.innerHTML = t("cab.fecha", "datos descargados el <b>{descarga}</b> · maestro <b>{maestro}</b>", {
+      descarga: esc(meta.fecha_descarga), maestro: esc(meta.version_maestro),
+    });
+  }
   document.querySelectorAll("header.top nav a").forEach((a) => {
     if (a.dataset.pagina === activa) a.classList.add("activa");
   });
   const pie = document.querySelector(".pie .meta");
   if (pie) {
-    pie.innerHTML =
-      `Datos: Secretaría de Energía de la Nación Argentina, ${esc(meta.licencia_datos)}; descarga del ${esc(meta.fecha_descarga)}, ` +
-      `tablas publicadas en <code>data/publicado/${esc(meta.version_maestro)}/</code>. Código MIT. ` +
-      `Generado el ${esc(meta.fecha_generacion)}.`;
+    pie.innerHTML = t(
+      "cab.pie",
+      "Datos: Secretaría de Energía de la Nación Argentina, {licencia}; descarga del {descarga}, tablas publicadas en <code>data/publicado/{maestro}/</code>. Código MIT. Generado el {generado}.",
+      { licencia: esc(meta.licencia_datos), descarga: esc(meta.fecha_descarga), maestro: esc(meta.version_maestro), generado: esc(meta.fecha_generacion) },
+    );
   }
   return meta;
 }

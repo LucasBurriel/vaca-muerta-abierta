@@ -173,7 +173,9 @@ def test_encode_flags():
 
 def test_files_written_and_valid_json(built):
     out, meta = built
-    expected = {"pozos.json", "resumen.json", "meta.json"} | {f"curvas_{n}.json" for n in S.NIVELES}
+    expected = {"pozos.json", "resumen.json", "meta.json", "simulador.json"} | {
+        f"curvas_{n}.json" for n in S.NIVELES
+    }
     assert {p.name for p in out.glob("*.json")} == expected
     for p in out.glob("*.json"):
         text = p.read_text(encoding="utf-8")
@@ -324,7 +326,14 @@ def test_js_reads_only_columns_the_site_data_has():
     )
     unknown = used - pozos_cols
     assert not unknown, f"JS reads columns pozos.json does not carry: {sorted(unknown)}"
-    tables = {"pozos": set(M.COLUMNS), "indicadores": set(I.COLUMNS), "curvas_tipo": set(C.COLUMNS)}
+    from vma.precios import fuentes as F
+
+    tables = {
+        "pozos": set(M.COLUMNS),
+        "indicadores": set(I.COLUMNS),
+        "curvas_tipo": set(C.COLUMNS),
+        "precios": set(F.COLUMNAS),  # the simulator cites its default prices (ADR-036)
+    }
     for tabla, col in re.findall(r'cita\("(\w+)",\s*"([a-z0-9_]+)"', src):
         assert tabla in tables, tabla
         assert col in tables[tabla], f"cita({tabla}, {col}) names a column the table does not have"
@@ -340,7 +349,7 @@ def test_js_reads_only_columns_the_site_data_has():
 
 
 def test_site_pages_exist_and_pin_cdn_versions():
-    for page in ("index", "explorador", "curvas", "mapa", "metodo"):
+    for page in ("index", "explorador", "curvas", "simulador", "mapa", "metodo"):
         assert (SITE / f"{page}.html").exists()
     src = _js_sources()
     for url in re.findall(r'src="(https://[^"]+)"', src) + re.findall(r'href="(https://cdnjs[^"]+)"', src):

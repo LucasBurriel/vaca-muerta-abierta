@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title data-i18n="sim.title">Simulador de campaña · Vaca Muerta abierta</title>
+<meta name="description" data-i18n-attr="content:sim.desc" content="Monte Carlo de una campaña de pozos nuevos desde las curvas tipo P10/P50/P90 públicas de Vaca Muerta: tasa agregada, acumulado, ingreso bruto y VAN con banda, en el navegador.">
+<link rel="stylesheet" href="css/estilo.css">
+<script src="js/idioma.js"></script>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <a class="brand" href="index.html">Vaca Muerta abierta</a>
+  <nav>
+    <a href="index.html" data-pagina="inicio" data-i18n="nav.inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador" data-i18n="nav.explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas" data-i18n="nav.curvas">Curvas tipo</a>
+    <a href="simulador.html" data-pagina="simulador" data-i18n="nav.simulador">Simulador</a>
+    <a href="mapa.html" data-pagina="mapa" data-i18n="nav.mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo" data-i18n="nav.metodo">Método y fuentes</a>
+  </nav>
+  <span class="idioma" role="group" aria-label="Idioma / Language"><a href="?lang=es" data-lang="es" lang="es" title="Español">ES</a><a href="?lang=en" data-lang="en" lang="en" title="English">EN</a></span>
+  <span class="fecha"></span>
+</div></header>
+
+<main class="wrap">
+  <h1 data-i18n="sim.h1">Simulador de campaña</h1>
+  <p class="lead" data-i18n="sim.lead">Cuánto produciría, y cuánto facturaría en bruto, una campaña de pozos nuevos si cada pozo se comportara como uno
+  de los pozos del grupo que elijas. El navegador sortea las campañas desde la curva tipo P10/P50/P90 publicada (tabla <code>curvas_tipo</code>)
+  y las valoriza con los precios públicos (tabla <code>precios</code>). Todo corre en tu máquina: no se envía nada.</p>
+
+  <div class="nota">
+    <b data-i18n="sim.limites.titulo">Qué es y qué no es</b>
+    <ul class="compacta">
+      <li data-i18n="sim.limites.p10"><b>P10 es el caso alto</b> (convención petrolera): una de cada diez campañas sorteadas queda por encima; P90 es el caso bajo.</li>
+      <li data-i18n="sim.limites.tef"><b>Las tasas son por día efectivo de producción</b>, no por día calendario (ADR-016). El calendario entra por el factor de uptime.</li>
+      <li data-i18n="sim.limites.sin"><b>Sin interferencia entre pozos, sin restricciones de instalaciones, sin costos.</b> El ingreso es <b>bruto</b>
+      (volumen × precio) y el VAN es el del ingreso bruto: no es ganancia ni una evaluación económica (ADR-035).</li>
+      <li data-i18n="sim.limites.banda"><b>La banda es sólo la dispersión entre pozos que muestra la curva tipo publicada.</b> No incluye incertidumbre de precio,
+      de geología ni de ejecución.</li>
+      <li data-i18n="sim.limites.extrapolacion"><b>Más allá del último mes publicado, la curva es una extrapolación hiperbólica</b> de cada cuantil, con declinación
+      terminal de 6 % anual (ADR-031, ADR-036). Las tarjetas dicen cuántos meses son y el gráfico marca dónde empiezan.</li>
+      <li data-i18n="sim.limites.grupo"><b>Es un grupo estadístico de pozos públicos</b>, no el pronóstico del plan de ninguna operadora ni una simulación de reservorio.</li>
+    </ul>
+  </div>
+
+  <div class="filtros" id="controles">
+    <label><span data-i18n="filtro.formacion">Formación</span> <select id="s-formacion"></select></label>
+    <label><span data-i18n="sim.c.ventana">Ventana de fluido</span> <select id="s-ventana"></select></label>
+    <label><span data-i18n="sim.c.cohorte">Cohorte de referencia</span> <select id="s-cohorte"></select></label>
+    <label><span data-i18n="sim.c.pozos">Pozos</span> <input id="s-pozos" type="number" min="1" max="500" step="1" value="12" inputmode="numeric"></label>
+    <label><span data-i18n="sim.c.ritmo">Pozos por mes</span> <input id="s-ritmo" type="number" min="1" max="500" step="1" value="2" inputmode="numeric"></label>
+    <label><span data-i18n="sim.c.rama">Rama (m)</span> <input id="s-rama" type="number" min="500" max="6000" step="100" inputmode="numeric" data-i18n-attr="placeholder:sim.c.rama.ph" placeholder="la del grupo"></label>
+    <label><span data-i18n="sim.c.meses">Horizonte (meses)</span> <input id="s-meses" type="number" min="12" max="120" step="12" value="120" inputmode="numeric"></label>
+    <label><span data-i18n="sim.c.uptime">Uptime (%)</span> <input id="s-uptime" type="number" min="50" max="100" step="1" value="92" inputmode="decimal"></label>
+    <label><span data-i18n="sim.c.precio_pet">Petróleo (USD/bbl)</span> <input id="s-precio-pet" type="number" min="0" step="0.5" inputmode="decimal"></label>
+    <label><span data-i18n="sim.c.precio_gas">Gas (USD/MMBTU)</span> <input id="s-precio-gas" type="number" min="0" step="0.05" inputmode="decimal"></label>
+    <label><span data-i18n="sim.c.tasa">Tasa de descuento (% anual)</span> <input id="s-tasa" type="number" min="0" max="50" step="0.5" value="10" inputmode="decimal"></label>
+    <label><span data-i18n="sim.c.regalia">Regalía (%)</span> <input id="s-regalia" type="number" min="0" max="50" step="1" value="0" inputmode="decimal"></label>
+    <label><span data-i18n="sim.c.fluido">Fluido de los gráficos</span> <select id="s-fluido">
+      <option value="petroleo" data-i18n="sim.fluido.petroleo">petróleo</option>
+      <option value="gas" data-i18n="sim.fluido.gas">gas</option>
+    </select></label>
+    <label><span data-i18n="sim.c.unidades">Unidades</span> <select id="s-unidades">
+      <option value="metrico" data-i18n="sim.unidades.metrico">m³ (las de la fuente)</option>
+      <option value="campo" data-i18n="sim.unidades.campo">bbl · MMscf (conversión)</option>
+    </select></label>
+    <label><span data-i18n="sim.c.nsim">Simulaciones</span> <input id="s-nsim" type="number" min="100" max="2000" step="100" value="500" inputmode="numeric"></label>
+    <label><span data-i18n="sim.c.semilla">Semilla</span> <input id="s-semilla" type="number" min="0" step="1" value="1" inputmode="numeric"></label>
+    <button id="s-correr" class="primario" data-i18n="sim.c.correr">Simular</button>
+    <button id="s-precios" data-i18n="sim.c.precios">Precios públicos</button>
+  </div>
+  <p id="estado" class="resumen-filtro" role="status" aria-live="polite"></p>
+  <p id="resumen-filtro" class="resumen-filtro"></p>
+
+  <div id="tarjetas" class="tarjetas"></div>
+
+  <div class="graficos-2">
+    <figure><figcaption id="t-tasa"></figcaption><div id="g-tasa" class="grafico"></div></figure>
+    <figure><figcaption id="t-acum"></figcaption><div id="g-acum" class="grafico"></div></figure>
+    <figure><figcaption id="t-ingreso"></figcaption><div id="g-ingreso" class="grafico"></div></figure>
+    <figure><figcaption id="t-ingreso-acum"></figcaption><div id="g-ingreso-acum" class="grafico"></div></figure>
+  </div>
+  <p class="resumen-filtro" data-i18n="sim.leyenda">En cada gráfico: P50 (línea) y P10–P90 (banda) entre las campañas sorteadas, por mes de campaña (mes 0 = primer pozo en producción).
+  La línea punteada vertical marca el primer mes en que algún pozo usa la curva extrapolada.</p>
+
+  <h2 data-i18n="sim.h2.notas">Lo que hay que saber de esta corrida</h2>
+  <ul class="compacta" id="notas"></ul>
+
+  <h2 data-i18n="sim.h2.como">Cómo se calcula</h2>
+  <ol class="compacta">
+    <li data-i18n="sim.como.1">Cada pozo simulado sortea una posición en el grupo (un percentil uniforme) y la conserva toda su vida, con un ruido mensual
+    de 8 puntos de percentil: un pozo bueno sigue siendo bueno.</li>
+    <li data-i18n="sim.como.2">Su tasa de cada mes se lee de los P90/P50/P10 publicados de ese mes de vida, por interpolación log-lineal.
+    Con rama y curva por metro, se muestrea la tasa por metro y se multiplica por la rama. Petróleo y gas de un pozo comparten la posición.</li>
+    <li data-i18n="sim.como.3">Los pozos entran de a <i>pozos por mes</i> desde el mes 0. Volumen mensual = tasa × 30,44 días × uptime.</li>
+    <li data-i18n="sim.como.4">Ingreso bruto = petróleo × precio + gas × precio, menos la regalía si se indica. VAN = Σ ingreso × (1 + tasa)<sup>−mes/12</sup>, mes 0 sin descontar.</li>
+    <li data-i18n="sim.como.5">Se repite para cada simulación; por mes se informan P10, P50 y P90 entre simulaciones. La semilla hace el resultado reproducible.</li>
+  </ol>
+
+  <footer class="pie">
+    <p data-i18n="sim.pie">Método: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/simulacion.md">docs/simulacion.md</a> ·
+    <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/precios.md">docs/precios.md</a>. Decisiones: ADR-017, ADR-031, ADR-034, ADR-035, ADR-036.
+    El mismo Monte Carlo existe en Python (<code>vma.simulacion.campania</code>) y como herramienta MCP <code>simular_campania</code>; un test compara ambos.</p>
+    <p class="meta"></p>
+  </footer>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.5.0/echarts.min.js" integrity="sha512-k37wQcV4v2h6jgYf5IUz1MoSKPpDs630XGSmCaCCOXxy2awgAWKHGZWr9nMyGgk3IOxA1NxdkN8r1JHgkUtMoQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script type="module" src="js/simulador.js"></script>
+</body>
+</html>

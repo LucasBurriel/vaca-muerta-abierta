@@ -1,4 +1,5 @@
-import { ETIQUETAS, cabecera, cargar, cita, colorEscala, distintos, entero, esc, fila, llenarSelect, motivoNulo, num, paleta } from "./comun.js";
+import { ETIQUETAS, cabecera, cargar, cita, colorEscala, distintos, entero, esc, fila, llenarSelect, motivoNulo, num, paleta, razonNulo } from "./comun.js";
+import { t } from "./i18n.js";
 
 const $ = (id) => document.getElementById(id);
 let P, mapa, capa;
@@ -31,11 +32,13 @@ function popup(r, col) {
   const filas = campos.map((k) => {
     const [et, un] = ETIQUETAS[k] || [k, ""];
     const v = r[k];
-    const txt = v === null || v === undefined ? `<i title="${esc(motivoNulo(k, r.flags))}">sin dato (${esc(motivoNulo(k, r.flags).replace(/^sin dato( porque)?: ?/, ""))})</i>` : typeof v === "number" ? num(v, k.endsWith("_por_m") ? 4 : 0) : esc(v);
+    const sinDato = t("nulo.corto", "sin dato");
+    const razon = razonNulo(k, r.flags) ?? t("nulo.fuente.corto", "la fuente no lo trae");
+    const txt = v === null || v === undefined ? `<i title="${esc(motivoNulo(k, r.flags))}">${sinDato} (${esc(razon)})</i>` : typeof v === "number" ? (k === "cohorte" ? v : num(v, k.endsWith("_por_m") ? 4 : 0)) : esc(v);
     return `<tr><td>${esc(et)}${un ? ` <small>(${esc(un)})</small>` : ""}</td><td><b>${txt}</b></td></tr>`;
   });
   return `<b>${esc(r.sigla)}</b> ${cita("pozos", "sigla")}<br><table>${filas.join("")}</table>
-    <small>coordenadas ${cita("pozos", "longitud")} ${cita("pozos", "latitud")}; valores ${cita("indicadores", col)}</small>`;
+    <small>${t("mapa.popup.pie", "coordenadas {lon} {lat}; valores {val}", { lon: cita("pozos", "longitud"), lat: cita("pozos", "latitud"), val: cita("indicadores", col) })}</small>`;
 }
 
 function dibujar() {
@@ -54,14 +57,14 @@ function dibujar() {
     const [et, un] = ETIQUETAS[col];
     leyenda =
       `<span style="--c:${colorEscala(lo, lo, hi)}">P5 ${num(lo, 4)}</span><span style="--c:${colorEscala((lo + hi) / 2, lo, hi)}">${num((lo + hi) / 2, 4)}</span>` +
-      `<span style="--c:${colorEscala(hi, lo, hi)}">P95 ${num(hi, 4)}</span><span style="--c:${SIN_DATO}">sin dato (${entero(idx.length - vals.length)})</span>` +
-      `&nbsp; ${esc(et)} (${esc(un)}) ${cita("indicadores", col)} — escala recortada en P5–P95 de los pozos filtrados`;
+      `<span style="--c:${colorEscala(hi, lo, hi)}">P95 ${num(hi, 4)}</span><span style="--c:${SIN_DATO}">${t("nulo.corto", "sin dato")} (${entero(idx.length - vals.length)})</span>` +
+      `&nbsp; ${esc(et)} (${esc(un)}) ${cita("indicadores", col)} — ${t("mapa.escala", "escala recortada en P5–P95 de los pozos filtrados")}`;
   } else {
     const cats = distintos(idx.map((i) => c[col][i]));
     const cols = paleta(cats.length);
     const m = new Map(cats.map((k, j) => [k, cols[j]]));
     colorDe = (i) => m.get(c[col][i]) ?? SIN_DATO;
-    leyenda = cats.map((k) => `<span style="--c:${m.get(k)}">${esc(k)}</span>`).join("") + `<span style="--c:${SIN_DATO}">sin dato</span> ${cita("indicadores", col)}`;
+    leyenda = cats.map((k) => `<span style="--c:${m.get(k)}">${esc(k)}</span>`).join("") + `<span style="--c:${SIN_DATO}">${t("nulo.corto", "sin dato")}</span> ${cita("indicadores", col)}`;
   }
   const bounds = [];
   for (const i of idx) {
@@ -78,7 +81,11 @@ function dibujar() {
   }
   $("leyenda").innerHTML = leyenda;
   const sinCoord = P.columnas.longitud.filter((v) => v === null).length;
-  $("resumen-filtro").innerHTML = `${entero(idx.length)} pozos dibujados ${cita("pozos", "longitud")} ${cita("pozos", "latitud")}; ${entero(sinCoord)} pozos del maestro no tienen coordenadas (flag <code>sin_coordenadas</code>).`;
+  $("resumen-filtro").innerHTML = t(
+    "mapa.resumen",
+    "{n} pozos dibujados {lon} {lat}; {sin} pozos del maestro no tienen coordenadas (flag <code>sin_coordenadas</code>).",
+    { n: entero(idx.length), lon: cita("pozos", "longitud"), lat: cita("pozos", "latitud"), sin: entero(sinCoord) },
+  );
 }
 
 async function main() {
@@ -96,6 +103,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  $("resumen-filtro").innerHTML = `<span class="error">No se pudieron cargar los datos: ${esc(e.message)}</span>`;
+  $("resumen-filtro").innerHTML = `<span class="error">${t("error.datos", "No se pudieron cargar los datos: {mensaje}", { mensaje: esc(e.message) })}</span>`;
   console.error(e);
 });

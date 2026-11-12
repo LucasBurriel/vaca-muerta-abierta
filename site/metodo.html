@@ -3,68 +3,78 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Método y fuentes · Vaca Muerta abierta</title>
+<title data-i18n="metodo.title">Método y fuentes · Vaca Muerta abierta</title>
+<meta name="description" data-i18n-attr="content:metodo.desc" content="De dónde sale cada número: datasets públicos de la Secretaría de Energía con fecha y hash, tablas publicadas, reglas de cálculo, decisiones y licencias.">
 <link rel="stylesheet" href="css/estilo.css">
+<script src="js/idioma.js"></script>
 </head>
 <body>
 <header class="top"><div class="wrap">
   <a class="brand" href="index.html">Vaca Muerta abierta</a>
   <nav>
-    <a href="index.html" data-pagina="inicio">Inicio</a>
-    <a href="explorador.html" data-pagina="explorador">Explorador de pozos</a>
-    <a href="curvas.html" data-pagina="curvas">Curvas tipo</a>
-    <a href="mapa.html" data-pagina="mapa">Mapa</a>
-    <a href="metodo.html" data-pagina="metodo">Método y fuentes</a>
+    <a href="index.html" data-pagina="inicio" data-i18n="nav.inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador" data-i18n="nav.explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas" data-i18n="nav.curvas">Curvas tipo</a>
+    <a href="simulador.html" data-pagina="simulador" data-i18n="nav.simulador">Simulador</a>
+    <a href="mapa.html" data-pagina="mapa" data-i18n="nav.mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo" data-i18n="nav.metodo">Método y fuentes</a>
   </nav>
+  <span class="idioma" role="group" aria-label="Idioma / Language"><a href="?lang=es" data-lang="es" lang="es" title="Español">ES</a><a href="?lang=en" data-lang="en" lang="en" title="English">EN</a></span>
   <span class="fecha"></span>
 </div></header>
 
 <main class="wrap">
-  <h1>Método y fuentes</h1>
-  <p class="lead">Todo lo que se ve en este sitio sale de tres tablas publicadas por el pipeline del repositorio, que a su vez salen
-  de los datasets públicos de la Secretaría de Energía. Nada se calcula en el navegador: el sitio lee JSON pre-agregados que
-  copian valores de esas tablas, con el nombre de tabla y columna al lado de cada número.</p>
+  <h1 data-i18n="metodo.h1">Método y fuentes</h1>
+  <p class="lead" data-i18n="metodo.lead">Todo lo que se ve en este sitio sale de las tablas publicadas por el pipeline del repositorio, que a su vez salen
+  de los datasets públicos de la Secretaría de Energía. El sitio lee JSON pre-agregados que copian valores de esas tablas, con el nombre
+  de tabla y columna al lado de cada número. Una sola página calcula en el navegador: el <a href="simulador.html">simulador de campaña</a>,
+  que sortea pozos desde las curvas tipo publicadas y los valoriza con la tabla <code>precios</code>; lo dice en cada resultado.</p>
 
-  <h2>Fuentes (descarga fechada, con hash)</h2>
-  <p>Portal <a href="https://datos.energia.gob.ar">datos.energia.gob.ar</a>, licencia <b>CC-BY 4.0</b>, Secretaría de Energía de la
+  <h2 data-i18n="metodo.h2.fuentes">Fuentes (descarga fechada, con hash)</h2>
+  <p data-i18n="metodo.fuentes.p">Portal <a href="https://datos.energia.gob.ar">datos.energia.gob.ar</a>, licencia <b>CC-BY 4.0</b>, Secretaría de Energía de la
   Nación Argentina. Fecha de descarga y manifiesto de la corrida que generó este sitio:</p>
   <div class="tabla-scroll"><table class="datos" id="fuentes"><thead>
-    <tr><th>dataset</th><th>archivo</th><th>bytes</th><th>sha256</th><th>last_modified (CKAN)</th></tr>
+    <tr><th>dataset</th><th data-i18n="metodo.th.archivo">archivo</th><th>bytes</th><th>sha256</th><th>last_modified (CKAN)</th></tr>
   </thead><tbody></tbody></table></div>
   <p class="resumen-filtro" id="meta-linea"></p>
-  <p>Detalle de cada dataset (URL, grano, unidades, atraso): <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/fuentes.md">docs/fuentes.md</a>.</p>
+  <p data-i18n="metodo.fuentes.detalle">Detalle de cada dataset (URL, grano, unidades, atraso): <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/fuentes.md">docs/fuentes.md</a>.
+  Los precios (crudo por provincia, gas por cuenca) son dos datasets más del mismo portal: <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/precios.md">docs/precios.md</a>.</p>
 
-  <h2>Tablas publicadas</h2>
+  <h2 data-i18n="metodo.h2.tablas">Tablas publicadas</h2>
   <div class="tabla-scroll"><table class="datos" id="tablas"><thead>
-    <tr><th>tabla</th><th>filas</th><th>columnas</th><th>qué es</th><th>definición de columnas</th></tr>
+    <tr><th data-i18n="metodo.th.tabla">tabla</th><th data-i18n="metodo.th.filas">filas</th><th data-i18n="metodo.th.columnas">columnas</th><th data-i18n="metodo.th.que">qué es</th><th data-i18n="metodo.th.def">definición de columnas</th></tr>
   </thead><tbody></tbody></table></div>
-  <p>Se reconstruyen con <code>python pipeline.py download · master · indicadores · curvas · site</code>; las tablas no se versionan,
+  <p data-i18n="metodo.tablas.p">Se reconstruyen con <code>python pipeline.py download · master · indicadores · curvas · site</code>; las tablas no se versionan,
   se regeneran (ADR-005, ADR-014). Este sitio se reconstruye el día 5 de cada mes por GitHub Actions (ADR-024).</p>
 
-  <h2>Reglas que hay que conocer para leer los números</h2>
+  <h2 data-i18n="metodo.h2.reglas">Reglas que hay que conocer para leer los números</h2>
   <ul class="compacta">
-    <li><b>Pozo físico = sigla normalizada</b>; <code>idpozo</code> es pozo × formación (ADR-003). Los indicadores suman los idpozo de un pozo (ADR-015).</li>
-    <li><b>Tasas por día efectivo</b> (<code>tef</code>), no por día calendario; IP30/90/180 son ventanas de días efectivos con el mes de cruce prorrateado (ADR-016).</li>
-    <li><b>Por metro solo con rama conocida y ≥ 500 m</b> (ADR-010, ADR-019). Si la fuente dice rama 0, es nulo con motivo, nunca 0.</li>
-    <li><b>Mínimo 5 pozos</b> para publicar un percentil; P10 es el caso alto (ADR-017).</li>
-    <li><b>Outliers marcados, no borrados</b>: z robusto sobre log10(IP90/m) por formación, |z| &gt; 3,5; las curvas se publican con y sin ellos (ADR-018).</li>
-    <li><b>Ventana de fluido</b> derivada del GOR propio del pozo (petróleo &lt; 180 m³/m³, volátil 180–1.800, gas ≥ 1.800); es una clasificación del dato, no del reservorio (ADR-020).</li>
-    <li><b>Operadora</b> = la de la última producción, con alias versionados; las ventas de activos no se unifican (ADR-012).</li>
-    <li><b>Lo que falta se dice</b>: cada nulo lleva un flag con el motivo (<code>flags</code>), y el explorador lo muestra.</li>
+    <li data-i18n="metodo.regla.pozo"><b>Pozo físico = sigla normalizada</b>; <code>idpozo</code> es pozo × formación (ADR-003). Los indicadores suman los idpozo de un pozo (ADR-015).</li>
+    <li data-i18n="metodo.regla.tef"><b>Tasas por día efectivo</b> (<code>tef</code>), no por día calendario; IP30/90/180 son ventanas de días efectivos con el mes de cruce prorrateado (ADR-016).</li>
+    <li data-i18n="metodo.regla.metro"><b>Por metro solo con rama conocida y ≥ 500 m</b> (ADR-010, ADR-019). Si la fuente dice rama 0, es nulo con motivo, nunca 0.</li>
+    <li data-i18n="metodo.regla.n"><b>Mínimo 5 pozos</b> para publicar un percentil; P10 es el caso alto (ADR-017).</li>
+    <li data-i18n="metodo.regla.outliers"><b>Outliers marcados, no borrados</b>: z robusto sobre log10(IP90/m) por formación, |z| &gt; 3,5; las curvas se publican con y sin ellos (ADR-018).</li>
+    <li data-i18n="metodo.regla.ventana"><b>Ventana de fluido</b> derivada del GOR propio del pozo (petróleo &lt; 180 m³/m³, volátil 180–1.800, gas ≥ 1.800); es una clasificación del dato, no del reservorio (ADR-020).</li>
+    <li data-i18n="metodo.regla.operadora"><b>Operadora</b> = la de la última producción, con alias versionados; las ventas de activos no se unifican (ADR-012).</li>
+    <li data-i18n="metodo.regla.falta"><b>Lo que falta se dice</b>: cada nulo lleva un flag con el motivo (<code>flags</code>), y el explorador lo muestra.</li>
+    <li data-i18n="metodo.regla.simulador"><b>El simulador no es un pronóstico</b>: muestrea la dispersión entre pozos de una curva tipo publicada, extrapola con un ajuste
+    hiperbólico más allá del último mes publicado y devuelve ingreso <b>bruto</b>, sin costos (ADR-031, ADR-035, ADR-036).</li>
   </ul>
 
-  <h2>Documentación e informes</h2>
+  <h2 data-i18n="metodo.h2.docs">Documentación e informes</h2>
   <ul class="compacta" id="docs">
-    <li><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/decisiones.md">docs/decisiones.md</a> — decisiones (ADR-001 en adelante)</li>
-    <li><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/maestro.md">docs/maestro.md</a> — cada columna del maestro de pozos y cada flag</li>
-    <li><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a> — cada columna de <code>indicadores</code> y <code>curvas_tipo</code>: fórmula, unidades, regla</li>
-    <li><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/fuentes.md">docs/fuentes.md</a> — cada dataset: URL, licencia, grano, tamaño</li>
-    <li><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/tree/main/docs/esquemas">docs/esquemas/</a> — esquema real de cada archivo descargado</li>
-    <li><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/tree/main/informes">informes/</a> — informes fechados: calidad (F0), maestro (F1), indicadores (F2), diff entre descargas</li>
+    <li data-i18n="metodo.doc.decisiones"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/decisiones.md">docs/decisiones.md</a> — decisiones (ADR-001 en adelante)</li>
+    <li data-i18n="metodo.doc.maestro"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/maestro.md">docs/maestro.md</a> — cada columna del maestro de pozos y cada flag</li>
+    <li data-i18n="metodo.doc.indicadores"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/indicadores.md">docs/indicadores.md</a> — cada columna de <code>indicadores</code> y <code>curvas_tipo</code>: fórmula, unidades, regla</li>
+    <li data-i18n="metodo.doc.fuentes"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/fuentes.md">docs/fuentes.md</a> — cada dataset: URL, licencia, grano, tamaño</li>
+    <li data-i18n="metodo.doc.simulacion"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/simulacion.md">docs/simulacion.md</a> · <a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/docs/precios.md">docs/precios.md</a> — declinación, Monte Carlo de campaña, precios públicos y valorización</li>
+    <li data-i18n="metodo.doc.esquemas"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/tree/main/docs/esquemas">docs/esquemas/</a> — esquema real de cada archivo descargado</li>
+    <li data-i18n="metodo.doc.informes"><a href="https://github.com/LucasBurriel/vaca-muerta-abierta/tree/main/informes">informes/</a> — informes fechados: calidad (F0), maestro (F1), indicadores (F2), diff entre descargas</li>
   </ul>
+  <p class="resumen-filtro" data-i18n="metodo.docs.idioma">En el repositorio, el <a href="https://github.com/LucasBurriel/vaca-muerta-abierta#readme">README</a>, las decisiones (ADR), el maestro, los indicadores y las fuentes están en inglés; simulación y precios, en español.</p>
 
-  <h2>Licencias</h2>
-  <p>Código: <b>MIT</b> (<a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/LICENSE">LICENSE</a>).
+  <h2 data-i18n="metodo.h2.licencias">Licencias</h2>
+  <p data-i18n="metodo.licencias.p">Código: <b>MIT</b> (<a href="https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/LICENSE">LICENSE</a>).
   Datos: <b>CC-BY 4.0</b>, Secretaría de Energía de la Nación Argentina; al reutilizar lo que se ve acá, citar la fuente original
   y la fecha de descarga. Mapa de fondo: © OpenStreetMap contributors (ODbL).</p>
 

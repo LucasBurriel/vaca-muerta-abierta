@@ -1,9 +1,11 @@
 import { cabecera, entero, esc } from "./comun.js";
+import { t } from "./i18n.js";
 
 const QUE_ES = {
-  pozos: ["maestro de pozos: una fila por pozo físico, alias, operadora y formación normalizadas, coordenadas, rama, fechas", "docs/maestro.md"],
-  indicadores: ["una fila por pozo: IP30/90/180 en días efectivos, acumulados, por metro, GOR, corte de agua, ventana, outliers, flags, linaje", "docs/indicadores.md"],
-  curvas_tipo: ["una fila por nivel × grupo × incluye_outliers × mes: P10/P50/P90/media de la tasa por día efectivo, n_pozos, publicable", "docs/indicadores.md"],
+  pozos: [t("metodo.que.pozos", "maestro de pozos: una fila por pozo físico, alias, operadora y formación normalizadas, coordenadas, rama, fechas"), "docs/maestro.md"],
+  indicadores: [t("metodo.que.indicadores", "una fila por pozo: IP30/90/180 en días efectivos, acumulados, por metro, GOR, corte de agua, ventana, outliers, flags, linaje"), "docs/indicadores.md"],
+  curvas_tipo: [t("metodo.que.curvas_tipo", "una fila por nivel × grupo × incluye_outliers × mes: P10/P50/P90/media de la tasa por día efectivo, n_pozos, publicable"), "docs/indicadores.md"],
+  precios: [t("metodo.que.precios", "precios públicos por mes: crudo en USD/m³ por provincia (informe de regalías) y gas en USD/MMBTU por cuenca, segmento y contrato, convertidos a las unidades de volumen del observatorio"), "docs/precios.md"],
 };
 const GH = "https://github.com/LucasBurriel/vaca-muerta-abierta/blob/main/";
 
@@ -16,9 +18,11 @@ async function main() {
         <td>${esc(String(f.ckan_last_modified ?? "").slice(0, 19))}</td></tr>`,
     )
     .join("");
-  document.getElementById("meta-linea").textContent =
-    `Descarga del ${meta.fecha_descarga} (manifiesto generado ${meta.manifest_generated_at}); maestro y tablas publicadas en data/publicado/${meta.version_maestro}/; ` +
-    `JSON del sitio generados el ${meta.fecha_generacion} (${meta.generado_utc}).`;
+  document.getElementById("meta-linea").textContent = t(
+    "metodo.meta",
+    "Descarga del {descarga} (manifiesto generado {manifiesto}); maestro y tablas publicadas en data/publicado/{maestro}/; JSON del sitio generados el {generado} ({utc}).",
+    { descarga: meta.fecha_descarga, manifiesto: meta.manifest_generated_at, maestro: meta.version_maestro, generado: meta.fecha_generacion, utc: meta.generado_utc },
+  );
   document.querySelector("#tablas tbody").innerHTML = Object.entries(meta.tablas)
     .map(([k, t]) => {
       const [que, doc] = QUE_ES[k] || ["", ""];
@@ -29,6 +33,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  document.getElementById("meta-linea").innerHTML = `<span class="error">No se pudo cargar meta.json: ${esc(e.message)}</span>`;
+  document.getElementById("meta-linea").innerHTML = `<span class="error">${t("metodo.error", "No se pudo cargar meta.json: {mensaje}", { mensaje: esc(e.message) })}</span>`;
   console.error(e);
 });

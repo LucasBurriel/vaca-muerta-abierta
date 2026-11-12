@@ -3,37 +3,49 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vaca Muerta abierta</title>
-<meta name="description" content="Observatorio abierto de los datos públicos por pozo de la Secretaría de Energía (Capítulo IV): pozos, indicadores por metro de rama, curvas tipo y mapa.">
+<title data-i18n="inicio.title">Vaca Muerta abierta</title>
+<meta name="description" data-i18n-attr="content:inicio.desc" content="Observatorio abierto de los datos públicos por pozo de la Secretaría de Energía (Capítulo IV): pozos, indicadores por metro de rama, curvas tipo, simulador de campaña y mapa.">
 <link rel="stylesheet" href="css/estilo.css">
+<script src="js/idioma.js"></script>
 </head>
 <body>
 <header class="top"><div class="wrap">
   <a class="brand" href="index.html">Vaca Muerta abierta</a>
   <nav>
-    <a href="index.html" data-pagina="inicio">Inicio</a>
-    <a href="explorador.html" data-pagina="explorador">Explorador de pozos</a>
-    <a href="curvas.html" data-pagina="curvas">Curvas tipo</a>
-    <a href="mapa.html" data-pagina="mapa">Mapa</a>
-    <a href="metodo.html" data-pagina="metodo">Método y fuentes</a>
+    <a href="index.html" data-pagina="inicio" data-i18n="nav.inicio">Inicio</a>
+    <a href="explorador.html" data-pagina="explorador" data-i18n="nav.explorador">Explorador de pozos</a>
+    <a href="curvas.html" data-pagina="curvas" data-i18n="nav.curvas">Curvas tipo</a>
+    <a href="simulador.html" data-pagina="simulador" data-i18n="nav.simulador">Simulador</a>
+    <a href="mapa.html" data-pagina="mapa" data-i18n="nav.mapa">Mapa</a>
+    <a href="metodo.html" data-pagina="metodo" data-i18n="nav.metodo">Método y fuentes</a>
   </nav>
+  <span class="idioma" role="group" aria-label="Idioma / Language"><a href="?lang=es" data-lang="es" lang="es" title="Español">ES</a><a href="?lang=en" data-lang="en" lang="en" title="English">EN</a></span>
   <span class="fecha"></span>
 </div></header>
 
 <main class="wrap">
-  <h1>Los datos públicos por pozo, limpios y comparables</h1>
-  <p class="lead">La Secretaría de Energía publica, para cada pozo del país, producción mensual, fracturas, coordenadas y fechas.
+  <h1 data-i18n="inicio.h1">Los datos públicos por pozo, limpios y comparables</h1>
+  <p class="lead" data-i18n="inicio.lead">La Secretaría de Energía publica, para cada pozo del país, producción mensual, fracturas, coordenadas y fechas.
   Acá se bajan, se miden, se cruzan y se publican con el linaje a la vista. Cada número de este sitio dice de qué tabla y
   columna sale: <span class="cita" title="así se ven las citas">tabla.columna</span>. Código y método en
   <a href="https://github.com/LucasBurriel/vaca-muerta-abierta">GitHub</a>.</p>
 
+  <div class="probar">
+    <div class="probar-texto">
+      <b data-i18n="inicio.probar.titulo">Probalo: simulá una campaña de pozos</b>
+      <span data-i18n="inicio.probar.texto">Elegí formación, ventana de fluido y cohorte. El navegador sortea 500 campañas desde la curva tipo publicada y
+      devuelve producción, ingreso bruto y VAN con banda P10–P90. Sin instalar nada; cada número con su fuente.</span>
+    </div>
+    <a class="probar-boton" href="simulador.html" data-i18n="inicio.probar.boton">Abrir el simulador →</a>
+  </div>
+
   <div id="tarjetas" class="tarjetas"></div>
 
-  <h2>Qué encontró cada fase</h2>
+  <h2 data-i18n="inicio.h2.fases">Qué encontró cada fase</h2>
   <div id="titulares"></div>
 
-  <h2>Vaca Muerta, ventana de petróleo: la rama se duplicó y el IP90 por metro no cayó</h2>
-  <p class="lead">Medianas por cohorte (año de primera producción) sobre los pozos en alcance con ventana <code>petroleo</code>.
+  <h2 data-i18n="inicio.h2.grafico">Vaca Muerta, ventana de petróleo: la rama se duplicó y el IP90 por metro no cayó</h2>
+  <p class="lead" data-i18n="inicio.lead.grafico">Medianas por cohorte (año de primera producción) sobre los pozos en alcance con ventana <code>petroleo</code>.
   Las tasas son por <b>día efectivo de producción</b>, no por día calendario (ADR-016). Cohortes con menos de 5 pozos con rama se muestran atenuadas.</p>
   <div id="grafico-inicio" class="grafico" style="height:380px"></div>
   <p id="cita-grafico" class="resumen-filtro"></p>

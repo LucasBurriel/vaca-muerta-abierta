@@ -1,4 +1,5 @@
 import { ETIQUETAS, cabecera, cargar, cita, distintos, entero, esc, fila, llenarSelect, motivoNulo, num } from "./comun.js";
+import { t } from "./i18n.js";
 
 // Columns shown, in order: [column, source table, decimals]. Names are the published tables' names.
 const COLS = [
@@ -63,9 +64,9 @@ function ordenar() {
 function celda(col, dec, r) {
   const v = r[col];
   if (v === null || v === undefined) {
-    return `<td class="nulo" title="${esc(motivoNulo(col, r.flags))}"><abbr>sin dato</abbr></td>`;
+    return `<td class="nulo" title="${esc(motivoNulo(col, r.flags))}"><abbr>${t("nulo.corto", "sin dato")}</abbr></td>`;
   }
-  if (typeof v === "boolean") return `<td>${v ? "sí" : "no"}</td>`;
+  if (typeof v === "boolean") return `<td>${v ? t("si", "sí") : t("no", "no")}</td>`;
   if (typeof v === "number") return `<td class="num">${dec === null ? v : num(v, dec)}</td>`;
   return `<td>${esc(v)}</td>`;
 }
@@ -96,13 +97,20 @@ function render() {
     filas.push(`<tr class="${cls}">${COLS.map(([col, , dec]) => celda(col, dec, r)).join("")}</tr>`);
   }
   document.querySelector("#tabla tbody").innerHTML = filas.join("");
-  $("pag-info").textContent = idx.length ? `${ini + 1}–${fin} de ${entero(idx.length)}` : "sin filas";
+  $("pag-info").textContent = idx.length
+    ? t("explorador.pagina", "{desde}–{hasta} de {total}", { desde: ini + 1, hasta: fin, total: entero(idx.length) })
+    : t("explorador.sin_filas", "sin filas");
   $("pag-ant").disabled = pagina === 0;
   $("pag-sig").disabled = fin >= idx.length;
   const conPm = idx.filter((i) => P.columnas.ip90_equivalente_m3_d_por_m[i] !== null).length;
-  $("resumen-filtro").innerHTML =
-    `${entero(idx.length)} pozos; ${entero(conPm)} con IP90 por metro ${cita("indicadores", "ip90_equivalente_m3_d_por_m")}. ` +
-    `Ordenado por <code>${esc(orden.col)}</code> ${orden.desc ? "descendente" : "ascendente"}; los nulos van al final.`;
+  $("resumen-filtro").innerHTML = t(
+    "explorador.resumen",
+    "{n} pozos; {conPm} con IP90 por metro {cita}. Ordenado por <code>{col}</code> {sentido}; los nulos van al final.",
+    {
+      n: entero(idx.length), conPm: entero(conPm), cita: cita("indicadores", "ip90_equivalente_m3_d_por_m"), col: esc(orden.col),
+      sentido: orden.desc ? t("explorador.orden.desc", "descendente") : t("explorador.orden.asc", "ascendente"),
+    },
+  );
 }
 
 function descargarCsv() {
@@ -138,6 +146,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  $("resumen-filtro").innerHTML = `<span class="error">No se pudieron cargar los datos: ${esc(e.message)}</span>`;
+  $("resumen-filtro").innerHTML = `<span class="error">${t("error.datos", "No se pudieron cargar los datos: {mensaje}", { mensaje: esc(e.message) })}</span>`;
   console.error(e);
 });
